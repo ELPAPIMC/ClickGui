@@ -73,6 +73,7 @@ local __n_Core_Loader = __newNode("Loader", __n_Core)
 local __n_Core_Module = __newNode("Module", __n_Core)
 local __n_Core_Notifications = __newNode("Notifications", __n_Core)
 local __n_Core_Settings = __newNode("Settings", __n_Core)
+local __n_Core_Styles = __newNode("Styles", __n_Core)
 local __n_Core_ThemeManager = __newNode("ThemeManager", __n_Core)
 local __n_Core_Tooltip = __newNode("Tooltip", __n_Core)
 local __n_Core_Visual = __newNode("Visual", __n_Core)
@@ -2458,6 +2459,7 @@ self.Window = window
 self.Modules = {}
 self.Icon = options and options.Icon
 self.IconSize = options and options.IconSize or 16
+self.Group = options and options.Group
 self.IconColor = options and options.IconColor
 self._ctx = ctx
 self._visible = true
@@ -2474,7 +2476,12 @@ AutomaticSize = Enum.AutomaticSize.Y,
 BackgroundTransparency = 1,
 Parent = self.Page,
 })
+local wide = window.Layout == "Sidebar" and window.StyleData.Sidebar == "Brand"
+if wide then
+Create.padding(self.List, 6, 18, 14, 18)
+else
 Create.padding(self.List, 6, 6, 6, 6)
+end
 local listLayout = Create.list(self.List, 4)
 theme:Bind(listLayout, "Padding", function(t)
 return UDim.new(0, t.ModuleSpacing)
@@ -2641,7 +2648,7 @@ Offset = options.Offset or Vector2.new(8, 8),
 TextSize = options.TextSize or 16,
 Sort = options.Sort or "Length",
 Background = options.Background ~= false,
-BackgroundTransparency = options.BackgroundTransparency or 0.45,
+BackgroundTransparency = options.BackgroundTransparency or (options.Style == "Pill" and 0.3 or 0.45),
 BackgroundColor = options.BackgroundColor or Color3.new(0, 0, 0),
 AccentBar = options.AccentBar or "Right",
 ColorMode = options.ColorMode or "Gradient",
@@ -2651,7 +2658,8 @@ GradientTo = options.GradientTo,
 GradientSpeed = options.GradientSpeed or 0,
 ShowInfo = options.ShowInfo ~= false,
 Font = options.Font,
-Spacing = options.Spacing or 0,
+Spacing = options.Spacing or (options.Style == "Pill" and 3 or 0),
+CornerRadius = options.CornerRadius or (options.Style == "Pill" and 6 or 0),
 Border = options.Border == true,
 BorderColor = options.BorderColor,
 BorderThickness = options.BorderThickness or 1,
@@ -2741,6 +2749,9 @@ Parent = self._list,
 })
 local layout = Create.list(row, 0, true)
 layout.VerticalAlignment = Enum.VerticalAlignment.Center
+if options.CornerRadius > 0 then
+Create.corner(row, options.CornerRadius)
+end
 local bar
 local function makeBar(order)
 bar = Create("Frame", { Name = "Bar", Size = UDim2.new(0, 2, 1, 0), LayoutOrder = order, Parent = row })
@@ -3960,6 +3971,7 @@ local Visual = require(script.Parent.Visual)
 local Create = require(Utilities.Create)
 local Maid = require(Utilities.Maid)
 local Signal = require(Utilities.Signal)
+local InputManager = require(script.Parent.InputManager)
 local HEADER_HEIGHT = 30
 local HEADER_HEIGHT_WITH_DESCRIPTION = 42
 local KEYBIND_ORDER = 1000000
@@ -3980,6 +3992,8 @@ type(options) == "table" and type(options.Name) == "string",
 orderCounter += 1
 local self = setmetatable({}, Module)
 local theme = ctx.Theme
+local S = ctx.Window.StyleData.Module
+local row = S.Layout == "Row"
 self.Name = options.Name
 self.Description = options.Description
 self.Category = category
@@ -4003,22 +4017,37 @@ self._animToken = 0
 self._order = orderCounter
 self._favorite = false
 self._pinned = false
+self._row = row
 self._defaultEnabled = options.Default == true and self.Toggleable
 self._iconActive = options.IconActiveColor
 self._iconInactive = options.IconInactiveColor
-local hasDescription = options.Description ~= nil and options.Description ~= ""
-local headerHeight = hasDescription and HEADER_HEIGHT_WITH_DESCRIPTION or HEADER_HEIGHT
+local hasDescription = (not row) and options.Description ~= nil and options.Description ~= ""
+local headerHeight = hasDescription and S.HeightDesc or S.Height
 local iconSize = options.IconSize or 14
 local leftPad = options.Icon and (10 + iconSize + 6) or 12
+local nameSize = theme:Get("ModuleTextSize")
+local nameHeight = nameSize + 5
+local nameY, descY = 0, 0
+if hasDescription then
+local total = nameHeight + 2 + 15
+nameY = math.floor((headerHeight - total) / 2)
+descY = nameY + nameHeight + 2
+end
+local rightPad = row and 58 or (S.SwitchW + 46)
 self.Frame = Create("Frame", {
 Name = "Module_" .. options.Name,
 Size = UDim2.new(1, 0, 0, 0),
 AutomaticSize = Enum.AutomaticSize.Y,
 BackgroundColor3 = theme:Get("Module"),
+BackgroundTransparency = row and 1 or 0,
 LayoutOrder = orderCounter,
 Parent = category.List,
 })
+if row then
+Visual.corner(theme, self.Frame, -4)
+else
 Visual.surface(theme, self.Frame, "module", 0.08)
+end
 Create.list(self.Frame, 0)
 self._header = Create("TextButton", {
 Name = "Header",
@@ -4026,6 +4055,7 @@ Size = UDim2.new(1, 0, 0, headerHeight),
 LayoutOrder = 1,
 Parent = self.Frame,
 })
+if not row then
 self._glow = Create("Frame", {
 Name = "Glow",
 Size = UDim2.fromScale(1, 1),
@@ -4044,8 +4074,8 @@ BackgroundTransparency = 1,
 Parent = self._header,
 })
 Create.pill(self._bar)
+end
 self._iconSize = iconSize
-self._iconY = 0.5
 if options.Icon then
 self._icon = Visual.icon(self._header, options.Icon, iconSize, theme:Get("TextDim"), {
 AnchorPoint = Vector2.new(0, 0.5),
@@ -4054,23 +4084,23 @@ Position = UDim2.new(0, 10, 0.5, 0),
 end
 self._nameLabel = Create("TextLabel", {
 Name = "Name",
-Position = UDim2.fromOffset(leftPad, hasDescription and 5 or 0),
-Size = UDim2.new(1, -(leftPad + 74), 0, hasDescription and 18 or headerHeight),
+Position = UDim2.fromOffset(leftPad, nameY),
+Size = UDim2.new(1, -(leftPad + rightPad), 0, hasDescription and nameHeight or headerHeight),
 Text = options.Name,
-TextSize = 13,
+TextSize = nameSize,
 TextXAlignment = Enum.TextXAlignment.Left,
 TextTruncate = Enum.TextTruncate.AtEnd,
-Font = theme:Get("Font"),
+Font = theme:Get(S.Layout == "Card" and S.HeightDesc > 50 and "FontBold" or "Font"),
 TextColor3 = theme:Get("Text"),
 Parent = self._header,
 })
-theme:Bind(self._nameLabel, "Font", "Font")
+theme:Bind(self._nameLabel, "Font", S.Layout == "Card" and S.HeightDesc > 50 and "FontBold" or "Font")
 theme:Bind(self._nameLabel, "TextSize", "ModuleTextSize")
 if hasDescription then
 self._descLabel = Create("TextLabel", {
 Name = "Description",
-Position = UDim2.fromOffset(leftPad, 23),
-Size = UDim2.new(1, -(leftPad + 74), 0, 14),
+Position = UDim2.fromOffset(leftPad, descY),
+Size = UDim2.new(1, -(leftPad + rightPad), 0, 15),
 Text = options.Description,
 TextSize = 11,
 TextXAlignment = Enum.TextXAlignment.Left,
@@ -4081,6 +4111,21 @@ Parent = self._header,
 })
 theme:Bind(self._descLabel, "TextColor3", "TextDim")
 theme:Bind(self._descLabel, "Font", "Font")
+end
+if row then
+self._keyTag = Create("TextLabel", {
+Name = "KeyTag",
+AnchorPoint = Vector2.new(1, 0.5),
+Position = UDim2.new(1, -34, 0.5, 0),
+Size = UDim2.fromOffset(0, 14),
+AutomaticSize = Enum.AutomaticSize.X,
+Text = "",
+TextSize = 11,
+TextColor3 = theme:Get("TextDim"),
+Font = theme:Get("Font"),
+Parent = self._header,
+})
+theme:Bind(self._keyTag, "TextColor3", "TextDim")
 end
 self._favMark = Create("Frame", {
 Name = "Favorite",
@@ -4103,12 +4148,14 @@ Parent = self._header,
 })
 Create.pill(self._pinMark)
 theme:Bind(self._pinMark, "BackgroundColor3", "Accent")
-if self.Toggleable then
+if self.Toggleable and not row then
+local knobSize = S.SwitchH - 4
+self._knobOn = UDim2.new(0, S.SwitchW - knobSize - 2, 0.5, 0)
 self._track = Create("Frame", {
 Name = "Switch",
 AnchorPoint = Vector2.new(1, 0.5),
 Position = UDim2.new(1, -10, 0.5, 0),
-Size = UDim2.fromOffset(28, 14),
+Size = UDim2.fromOffset(S.SwitchW, S.SwitchH),
 BackgroundColor3 = theme:Get("Element"),
 Parent = self._header,
 })
@@ -4117,7 +4164,7 @@ self._knob = Create("Frame", {
 Name = "Knob",
 AnchorPoint = Vector2.new(0, 0.5),
 Position = UDim2.new(0, 2, 0.5, 0),
-Size = UDim2.fromOffset(10, 10),
+Size = UDim2.fromOffset(knobSize, knobSize),
 BackgroundColor3 = theme:Get("TextDim"),
 Parent = self._track,
 })
@@ -4126,15 +4173,29 @@ end
 self._chevronButton = Create("TextButton", {
 Name = "Expand",
 AnchorPoint = Vector2.new(1, 0.5),
-Position = UDim2.new(1, self.Toggleable and -42 or -8, 0.5, 0),
+Position = UDim2.new(1, row and -6 or ((self.Toggleable and -(S.SwitchW + 14)) or -8), 0.5, 0),
 Size = UDim2.fromOffset(24, 24),
-Text = "›",
+Text = row and "" or "›",
 TextSize = 20,
 TextColor3 = theme:Get("TextDim"),
 Visible = false,
 Parent = self._header,
 })
 theme:Bind(self._chevronButton, "TextColor3", "TextDim")
+if row then
+self._dots = {}
+for index = 0, 3 do
+local dot = Create("Frame", {
+Name = "Dot",
+Position = UDim2.new(0.5, -4 + (index % 2) * 5, 0.5, -4 + math.floor(index / 2) * 5),
+Size = UDim2.fromOffset(3, 3),
+BackgroundColor3 = theme:Get("TextDim"),
+Parent = self._chevronButton,
+})
+Create.pill(dot)
+self._dots[index + 1] = dot
+end
+end
 self._clip = Create("Frame", {
 Name = "Settings",
 Size = UDim2.new(1, 0, 0, 0),
@@ -4148,7 +4209,7 @@ Name = "Separator",
 Position = UDim2.fromOffset(8, 0),
 Size = UDim2.new(1, -16, 0, 1),
 BackgroundColor3 = theme:Get("Stroke"),
-BackgroundTransparency = 0.5,
+BackgroundTransparency = row and 1 or 0.5,
 Parent = self._clip,
 })
 theme:Bind(separator, "BackgroundColor3", "Stroke")
@@ -4198,8 +4259,9 @@ self._maid:Give(theme.Changed:Connect(function()
 self:_render(true)
 end))
 self:_render(false)
-if options.Tooltip then
-self:SetTooltip(options.Tooltip)
+local tooltip = options.Tooltip or (row and options.Description or nil)
+if tooltip then
+self:SetTooltip(tooltip)
 end
 if self.Toggleable then
 if options.ShowKeybind ~= false then
@@ -4212,10 +4274,20 @@ end,
 })
 keybind.Frame.LayoutOrder = KEYBIND_ORDER
 self.KeybindComponent = keybind
+if self._keyTag then
+local function refresh(key)
+self._keyTag.Text = key and ("[" .. InputManager.KeyName(key) .. "]") or ""
+end
+refresh(keybind.Value)
+self._maid:Give(keybind.Changed:Connect(refresh))
+end
 elseif options.Keybind then
 self._maid:Give(ctx.Input:BindKey(options.Keybind, function()
 self:Toggle()
 end))
+if self._keyTag then
+self._keyTag.Text = "[" .. InputManager.KeyName(options.Keybind) .. "]"
+end
 end
 end
 if options.Default and self.Toggleable then
@@ -4247,6 +4319,28 @@ local accent = theme:Get("Accent")
 local base = theme:Get("Module")
 local hovered = self._hovered
 local enabled = self.Enabled
+if self._row then
+local background, transparency = theme:Get("Element"), 1
+if enabled then
+transparency = 0.4
+end
+if hovered then
+background = theme:Get("ModuleHover")
+transparency = enabled and 0.25 or 0.55
+end
+AnimationManager.Play(
+self.Frame,
+preset,
+{ BackgroundColor3 = background, BackgroundTransparency = transparency }
+)
+AnimationManager.Play(self._nameLabel, preset, {
+TextColor3 = (enabled or not self.Toggleable) and theme:Get("Text")
+or theme:Get("TextDim"):Lerp(theme:Get("Text"), hovered and 0.55 or 0.15),
+})
+for _, dot in self._dots do
+AnimationManager.Play(dot, preset, { BackgroundColor3 = self._expanded and accent or theme:Get("TextDim") })
+end
+else
 local background = base
 if enabled then
 background = base:Lerp(accent, 0.1)
@@ -4258,7 +4352,11 @@ AnimationManager.Play(self.Frame, preset, {
 BackgroundColor3 = background,
 BackgroundTransparency = theme:Get("Transparency"),
 })
-AnimationManager.Play(self._bar, preset, { BackgroundTransparency = enabled and 0 or 1, BackgroundColor3 = accent })
+AnimationManager.Play(
+self._bar,
+preset,
+{ BackgroundTransparency = enabled and 0 or 1, BackgroundColor3 = accent }
+)
 AnimationManager.Play(
 self._glow,
 preset,
@@ -4268,6 +4366,7 @@ AnimationManager.Play(self._nameLabel, preset, {
 TextColor3 = (enabled or not self.Toggleable) and theme:Get("Text")
 or theme:Get("TextDim"):Lerp(theme:Get("Text"), hovered and 0.6 or 0.25),
 })
+end
 if self._icon then
 local active = self._iconActive or accent
 local inactive = self._iconInactive or theme:Get("TextDim")
@@ -4278,7 +4377,7 @@ end
 if self._track then
 AnimationManager.Play(self._track, preset, { BackgroundColor3 = enabled and accent or theme:Get("Element") })
 AnimationManager.Play(self._knob, animated and "Pop" or "Instant", {
-Position = enabled and UDim2.new(0, 16, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+Position = enabled and self._knobOn or UDim2.new(0, 2, 0.5, 0),
 BackgroundColor3 = enabled and Color3.new(1, 1, 1) or theme:Get("TextDim"),
 })
 end
@@ -4423,7 +4522,11 @@ if self._animToken == token then
 self._animating = false
 end
 end)
+if self._row then
+self:_render(true)
+else
 AnimationManager.Play(self._chevronButton, "Normal", { Rotation = expanded and 90 or 0 })
+end
 self:_updateHeight()
 end
 function Module:Expand()
@@ -5564,6 +5667,68 @@ return category, modules
 end
 return Settings
 end
+__functions[__n_Core_Styles] = function(script, require)
+local Styles = {}
+Styles.Names = { "Classic", "Flat", "Glass" }
+Styles.Data = {
+Classic = {
+Name = "Classic",
+Module = { Layout = "Card", Height = 30, HeightDesc = 42, SwitchW = 28, SwitchH = 14 },
+Sidebar = "Classic",
+Panels = { Header = "Classic", HeaderHeight = 34, Search = "Top", Palette = false },
+Theme = {},
+ShowCounts = true,
+},
+Flat = {
+Name = "Flat",
+Module = { Layout = "Row", Height = 30, HeightDesc = 30, SwitchW = 0, SwitchH = 0 },
+Sidebar = "Classic",
+Panels = { Header = "Plain", HeaderHeight = 42, Search = "Bottom", Palette = true },
+Theme = {
+Gradients = false,
+AccentLine = false,
+Border = true,
+BorderThickness = 1,
+BorderTransparency = 0.78,
+CornerRadius = 14,
+Transparency = 0.05,
+ModuleSpacing = 2,
+ModuleTextSize = 13,
+HeaderTextSize = 14,
+ShadowPreset = "Soft",
+ShadowOpacity = 0.35,
+SheenStrength = 0,
+HeaderAlign = "Center",
+},
+ShowCounts = false,
+},
+Glass = {
+Name = "Glass",
+Module = { Layout = "Card", Height = 44, HeightDesc = 62, SwitchW = 38, SwitchH = 20 },
+Sidebar = "Brand",
+Panels = { Header = "Classic", HeaderHeight = 38, Search = "Top", Palette = false },
+Theme = {
+Gradients = true,
+GradientStrength = 1.5,
+AccentLine = false,
+Border = true,
+BorderThickness = 1,
+BorderTransparency = 0.62,
+CornerRadius = 16,
+Transparency = 0.1,
+ModuleSpacing = 8,
+ModuleTextSize = 14,
+HeaderTextSize = 15,
+ShadowPreset = "Strong",
+ShadowOpacity = 0.55,
+SheenStrength = 0.1,
+HeaderAlign = "Left",
+},
+ShowCounts = true,
+},
+}
+return Styles
+end
 __functions[__n_Core_ThemeManager] = function(script, require)
 local Types = require(script.Parent.Parent.Types)
 local Signal = require(script.Parent.Parent.Utilities.Signal)
@@ -5647,6 +5812,46 @@ Element = Color3.fromRGB(34, 39, 54),
 ElementHover = Color3.fromRGB(44, 50, 68),
 Stroke = Color3.fromRGB(44, 52, 74),
 }),
+Mocha = derive("Mocha", {
+Accent = Color3.fromRGB(236, 140, 64),
+Background = Color3.fromRGB(30, 21, 19),
+Panel = Color3.fromRGB(46, 33, 30),
+Header = Color3.fromRGB(52, 38, 34),
+Module = Color3.fromRGB(56, 41, 37),
+ModuleHover = Color3.fromRGB(68, 50, 45),
+Element = Color3.fromRGB(74, 55, 49),
+ElementHover = Color3.fromRGB(88, 66, 59),
+Text = Color3.fromRGB(245, 235, 225),
+TextDim = Color3.fromRGB(165, 145, 134),
+Stroke = Color3.fromRGB(92, 70, 62),
+}),
+Midnight = derive("Midnight", {
+Accent = Color3.fromRGB(99, 102, 241),
+Background = Color3.fromRGB(8, 10, 28),
+Panel = Color3.fromRGB(14, 16, 42),
+Header = Color3.fromRGB(18, 21, 54),
+Module = Color3.fromRGB(22, 26, 64),
+ModuleHover = Color3.fromRGB(30, 35, 80),
+Element = Color3.fromRGB(32, 37, 84),
+ElementHover = Color3.fromRGB(42, 48, 100),
+Text = Color3.fromRGB(240, 242, 255),
+TextDim = Color3.fromRGB(142, 148, 192),
+Stroke = Color3.fromRGB(52, 60, 128),
+}),
+Ink = derive("Ink", {
+Accent = Color3.fromRGB(168, 120, 255),
+Background = Color3.fromRGB(10, 10, 18),
+Panel = Color3.fromRGB(17, 17, 28),
+Header = Color3.fromRGB(21, 21, 34),
+Module = Color3.fromRGB(25, 25, 40),
+ModuleHover = Color3.fromRGB(35, 35, 54),
+Element = Color3.fromRGB(38, 38, 58),
+ElementHover = Color3.fromRGB(50, 50, 74),
+Text = Color3.fromRGB(232, 232, 246),
+TextDim = Color3.fromRGB(132, 132, 164),
+Stroke = Color3.fromRGB(46, 46, 72),
+}),
+Rose = derive("Rose", { Accent = Color3.fromRGB(244, 114, 182) }),
 Crimson = derive("Crimson", { Accent = Color3.fromRGB(239, 68, 68) }),
 Emerald = derive("Emerald", { Accent = Color3.fromRGB(16, 185, 129) }),
 Sunset = derive("Sunset", { Accent = Color3.fromRGB(251, 146, 60) }),
@@ -5762,6 +5967,19 @@ function ThemeManager.SetAccent(self: ThemeManager, color: Color3)
 local theme: any = table.clone(self.Current)
 theme.Accent = color
 theme.AccentDark = shade(color)
+self.Current = theme :: Theme
+self:_refresh()
+end
+function ThemeManager.Patch(self: ThemeManager, values: { [string]: any })
+local theme: any = table.clone(self.Current)
+for key, value in values do
+if (BASE :: any)[key] ~= nil then
+theme[key] = value
+end
+end
+if values.Accent and not values.AccentDark then
+theme.AccentDark = shade(values.Accent)
+end
 self.Current = theme :: Theme
 self:_refresh()
 end
@@ -6081,7 +6299,7 @@ theme:Bind(gradient, "Enabled", "Gradients")
 return sheen
 end
 function Visual.surface(theme, instance, kind, strength)
-Visual.corner(theme, instance, kind == "module" and -2 or 0)
+local corner = Visual.corner(theme, instance, kind == "module" and -2 or 0)
 local stroke = Visual.stroke(theme, instance, kind == "module" and 0.3 or 0)
 if strength and strength > 0 then
 if instance:IsA("CanvasGroup") then
@@ -6090,7 +6308,7 @@ else
 Visual.gradient(theme, instance, strength)
 end
 end
-return stroke
+return stroke, corner
 end
 function Visual.icon(parent, spec, size, color, props)
 local text = tostring(spec)
@@ -6131,6 +6349,7 @@ local InputManager = require(script.Parent.InputManager)
 local Category = require(script.Parent.Category)
 local Config = require(script.Parent.Config)
 local Tooltip = require(script.Parent.Tooltip)
+local Styles = require(script.Parent.Styles)
 local Visual = require(script.Parent.Visual)
 local ThemeManager = require(script.Parent.ThemeManager)
 local UIShadow = require(Components.UIShadow)
@@ -6158,6 +6377,18 @@ end
 if options.Accent then
 self.Theme:SetAccent(options.Accent)
 end
+local styleName = options.Style or "Classic"
+if not Styles.Data[styleName] then
+warn(`[ClickGUI] Unknown style "{styleName}" (Classic, Flat, Glass)`)
+styleName = "Classic"
+end
+self.Style = styleName
+self.StyleData = Styles.Data[styleName]
+self._styleValues = options.ThemeValues
+self:_reapplyStyle()
+self._paletteOption = options.Palette
+self._headerHeight = self.StyleData.Panels.HeaderHeight
+self._brandIcon = options.Icon
 self.Title = options.Title or "ClickGUI"
 self.Subtitle = options.Subtitle
 self.Layout = options.Layout or "Panels"
@@ -6203,7 +6434,11 @@ self._maxPanelHeight = options.MaxPanelHeight or 380
 self._backdropEnabled = options.Backdrop ~= false
 self._toggleKey = options.ToggleKey or Enum.KeyCode.RightShift
 self._openAnimation = options.OpenAnimation or "Rise"
-self._showCounts = options.ShowCounts ~= false
+if options.ShowCounts == nil then
+self._showCounts = self.StyleData.ShowCounts
+else
+self._showCounts = options.ShowCounts == true
+end
 self._searchKey = options.SearchKey == nil and Enum.KeyCode.F or options.SearchKey
 self._configKey = options.ConfigKey or self.Title
 self._autoSave = options.AutoSave == true
@@ -6257,6 +6492,7 @@ self._maid:Give(self.Gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(functi
 self:_updateScale()
 end))
 self._maid:Give(self.Theme.Changed:Connect(function()
+self:_updateHeader()
 self:_applyShadows()
 end))
 self:_updateScale()
@@ -6318,23 +6554,65 @@ shadow:SetCornerRadius(theme.CornerRadius)
 end
 end
 end
-function Window:_createSearchBox(parent, size, position, anchor)
+function Window:_magnifier(parent, position)
 local theme = self.Theme
+local icon = Create("Frame", {
+Name = "Magnifier",
+AnchorPoint = Vector2.new(0, 0.5),
+Position = position,
+Size = UDim2.fromOffset(14, 14),
+BackgroundTransparency = 1,
+Parent = parent,
+})
+local ring = Create("Frame", { Size = UDim2.fromOffset(10, 10), BackgroundTransparency = 1, Parent = icon })
+Create.pill(ring)
+local stroke = Create.stroke(ring, theme:Get("TextDim"), 1.5, 0)
+theme:Bind(stroke, "Color", "TextDim")
+local handle = Create("Frame", {
+AnchorPoint = Vector2.new(0.5, 0.5),
+Position = UDim2.fromOffset(11, 11),
+Size = UDim2.fromOffset(6, 1.5),
+Rotation = 45,
+BackgroundColor3 = theme:Get("TextDim"),
+Parent = icon,
+})
+theme:Bind(handle, "BackgroundColor3", "TextDim")
+return icon
+end
+function Window:_createSearchBox(parent, size, position, anchor, variant)
+local theme = self.Theme
+local pill = variant == "pill"
+local pillBox = variant == "pill-box"
 local frame = Create("Frame", {
 Name = "Search",
 AnchorPoint = anchor,
 Position = position,
 Size = size,
 BackgroundColor3 = theme:Get("Element"),
+BackgroundTransparency = pill and 1 or 0,
 Parent = parent,
 })
-Visual.corner(theme, frame, -2)
+if not pill then
+local boxCorner = Visual.corner(theme, frame, -2)
 theme:Bind(frame, "BackgroundColor3", "Element")
+if pillBox then
+theme:Bind(boxCorner, "CornerRadius", function()
+return UDim.new(0.5, 0)
+end)
+frame.BackgroundTransparency = 0.35
+Visual.stroke(theme, frame, 0.2)
+end
+end
+local inset = 10
+if pill or pillBox then
+self:_magnifier(frame, UDim2.new(0, 14, 0.5, 0))
+inset = 36
+end
 local box = Create("TextBox", {
 Name = "Box",
-Position = UDim2.fromOffset(10, 0),
-Size = UDim2.new(1, -34, 1, 0),
-PlaceholderText = "Search modules...",
+Position = UDim2.fromOffset(inset, 0),
+Size = UDim2.new(1, -(inset + 24), 1, 0),
+PlaceholderText = (pill or pillBox) and "Search modules..." or "Search modules...",
 PlaceholderColor3 = theme:Get("TextDim"),
 TextColor3 = theme:Get("Text"),
 Font = theme:Get("Font"),
@@ -6427,12 +6705,105 @@ self.Theme:Bind(label, "TextColor3", "TextDim")
 self._empty = label
 return label
 end
-function Window:_buildPanelsExtras()
+local DEFAULT_PALETTE =
+{ "Violet", "Ocean", "Crimson", "Emerald", "Sunset", "Rose", "Mocha", "Midnight", "Ink", "Mono" }
+function Window:_buildPalette(spec)
+if self._paletteHolder then
+self._paletteHolder.Holder:Destroy()
+self._paletteHolder = nil
+end
+if not spec then
+return
+end
+local theme = self.Theme
+local items = {}
+if type(spec) == "table" then
+for _, value in spec do
+table.insert(items, value)
+end
+else
+for _, name in DEFAULT_PALETTE do
+if theme._presets[name] then
+table.insert(items, name)
+end
+end
+end
+if #items == 0 then
+return
+end
+local width = #items * 12 + (#items - 1) * 9 + 28
 local holder = Create("Frame", {
-Name = "SearchHolder",
+Name = "Palette",
 AnchorPoint = Vector2.new(0.5, 0),
 Position = UDim2.new(0.5, 0, 0, 16),
-Size = UDim2.fromOffset(250, 30),
+Size = UDim2.fromOffset(width, 26),
+BackgroundTransparency = 1,
+Parent = self.Container,
+})
+local scale = Create("UIScale", { Scale = self._scale, Parent = holder })
+table.insert(self._scales, scale)
+local canvas = Create("CanvasGroup", {
+Name = "Canvas",
+Size = UDim2.fromScale(1, 1),
+BackgroundColor3 = theme:Get("Header"),
+Parent = holder,
+})
+theme:Bind(canvas, "BackgroundColor3", "Header")
+local stroke, paletteCorner = Visual.surface(theme, canvas, "panel", 0)
+theme:Bind(paletteCorner, "CornerRadius", function()
+return UDim.new(0.5, 0)
+end)
+local dots = {}
+for index, item in items do
+local color = type(item) == "string"
+and (theme._presets[item] and theme._presets[item].Accent or Color3.new(1, 1, 1))
+or item
+local dot = Create("TextButton", {
+Name = "Dot",
+Position = UDim2.fromOffset(14 + (index - 1) * 21, 7),
+Size = UDim2.fromOffset(12, 12),
+BackgroundTransparency = 0,
+BackgroundColor3 = color,
+Parent = canvas,
+})
+Create.pill(dot)
+local ring = Create.stroke(dot, Color3.new(1, 1, 1), 1.5, 1)
+dots[index] = { Item = item, Ring = ring }
+self._maid:Give(dot.MouseButton1Click:Connect(function()
+if type(item) == "string" then
+self:SetTheme(item)
+else
+self:SetAccent(item)
+end
+end))
+end
+local function refresh()
+local current = theme.Current
+for _, data in dots do
+local selected
+if type(data.Item) == "string" then
+selected = current.Name == data.Item
+else
+selected = current.Accent == data.Item
+end
+AnimationManager.Play(data.Ring, "Fast", { Transparency = selected and 0 or 1 })
+end
+end
+self._maid:GiveNamed("paletteRefresh", theme.Changed:Connect(refresh))
+refresh()
+self._paletteHolder = { Holder = holder, Canvas = canvas, Stroke = stroke }
+end
+function Window:SetPalette(spec)
+self:_buildPalette(spec)
+end
+function Window:_buildPanelsExtras()
+local panelStyle = self.StyleData.Panels
+local bottom = panelStyle.Search == "Bottom"
+local holder = Create("Frame", {
+Name = "SearchHolder",
+AnchorPoint = Vector2.new(0.5, bottom and 1 or 0),
+Position = bottom and UDim2.new(0.5, 0, 1, -36) or UDim2.new(0.5, 0, 0, 16),
+Size = bottom and UDim2.fromOffset(190, 34) or UDim2.fromOffset(250, 30),
 BackgroundTransparency = 1,
 Parent = self.Container,
 })
@@ -6445,17 +6816,32 @@ BackgroundColor3 = self.Theme:Get("Header"),
 Parent = holder,
 })
 self.Theme:Bind(canvas, "BackgroundColor3", "Header")
-local searchStroke = Visual.surface(self.Theme, canvas, "panel", 0.2)
+local searchStroke, searchCorner = Visual.surface(self.Theme, canvas, "panel", bottom and 0 or 0.2)
+if bottom then
+self.Theme:Bind(searchCorner, "CornerRadius", function()
+return UDim.new(0.5, 0)
+end)
+self:_createSearchBox(canvas, UDim2.fromScale(1, 1), UDim2.new(), Vector2.zero, "pill")
+else
 self:_createSearchBox(canvas, UDim2.new(1, -8, 1, -8), UDim2.fromOffset(4, 4), Vector2.zero)
+end
 self._searchHolder = { Canvas = canvas, Stroke = searchStroke }
 self:_createEmptyLabel(self.Container, {
-AnchorPoint = Vector2.new(0.5, 0),
-Position = UDim2.new(0.5, 0, 0, 56),
+AnchorPoint = Vector2.new(0.5, bottom and 1 or 0),
+Position = bottom and UDim2.new(0.5, 0, 1, -82) or UDim2.new(0.5, 0, 0, 56),
 Size = UDim2.fromOffset(240, 30),
 BackgroundTransparency = 1,
 })
+local palette = self._paletteOption
+if palette == nil then
+palette = panelStyle.Palette
+end
+self:_buildPalette(palette or nil)
 end
 function Window:_sidebarWidth()
+if self._sidebar and self._sidebar.Brand then
+return math.clamp(math.floor(self.Size.X.Offset * 0.27), 170, 230)
+end
 return math.clamp(math.floor(self.Size.X.Offset * 0.23), 120, 190)
 end
 function Window:_layoutSidebar()
@@ -6464,9 +6850,11 @@ if not sidebar then
 return
 end
 local width = self:_sidebarWidth()
-sidebar.Frame.Size = UDim2.new(0, width, 1, -TITLEBAR_HEIGHT)
-sidebar.Content.Position = UDim2.fromOffset(width, TITLEBAR_HEIGHT)
-sidebar.Content.Size = UDim2.new(1, -width, 1, -TITLEBAR_HEIGHT)
+local top = sidebar.Top or TITLEBAR_HEIGHT
+sidebar.Frame.Position = UDim2.fromOffset(0, top)
+sidebar.Frame.Size = UDim2.new(0, width, 1, -top)
+sidebar.Content.Position = UDim2.fromOffset(width, top)
+sidebar.Content.Size = UDim2.new(1, -width, 1, -top)
 end
 function Window:_addGrip(parent)
 for _, offset in { { 12, 12 }, { 8, 12 }, { 12, 8 } } do
@@ -6480,7 +6868,217 @@ Parent = parent,
 self.Theme:Bind(dot, "BackgroundColor3", "TextDim")
 end
 end
+function Window:_buildSidebarBrand()
+local theme = self.Theme
+local holder, canvas, shadow, surfaceStroke =
+self:_createSurface("Window", self.Size, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5))
+self._sidebar = { Holder = holder, Canvas = canvas, Shadow = shadow, Stroke = surfaceStroke, Top = 0, Brand = true }
+local sidebar = Create("Frame", {
+Name = "Sidebar",
+BackgroundColor3 = theme:Get("Background"),
+BackgroundTransparency = 0.45,
+Parent = canvas,
+})
+theme:Bind(sidebar, "BackgroundColor3", "Background")
+local brandBlock = Create(
+"Frame",
+{ Name = "Brand", Size = UDim2.new(1, 0, 0, 68), BackgroundTransparency = 1, Active = true, Parent = sidebar }
+)
+local textX = 18
+if self._brandIcon then
+local icon = Visual.icon(brandBlock, self._brandIcon, 28, theme:Get("Accent"), {
+AnchorPoint = Vector2.new(0, 0.5),
+Position = UDim2.new(0, 16, 0.5, 0),
+})
+theme:Bind(icon.Instance, icon.Property, "Accent")
+textX = 54
+end
+local title = Create("TextLabel", {
+Name = "Title",
+Position = UDim2.fromOffset(textX, self.Subtitle and 16 or 0),
+Size = UDim2.new(1, -textX - 8, 0, self.Subtitle and 22 or 68),
+Text = self.Title,
+TextSize = 17,
+Font = theme:Get("FontBold"),
+TextColor3 = theme:Get("Text"),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextTruncate = Enum.TextTruncate.AtEnd,
+Parent = brandBlock,
+})
+theme:Bind(title, "TextColor3", "Text")
+theme:Bind(title, "Font", "FontBold")
+if self.Subtitle then
+local subtitle = Create("TextLabel", {
+Name = "Subtitle",
+Position = UDim2.fromOffset(textX, 38),
+Size = UDim2.new(1, -textX - 8, 0, 14),
+Text = string.upper(self.Subtitle),
+TextSize = 10,
+Font = theme:Get("Font"),
+TextColor3 = theme:Get("TextDim"),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextTruncate = Enum.TextTruncate.AtEnd,
+Parent = brandBlock,
+})
+theme:Bind(subtitle, "TextColor3", "TextDim")
+end
+local tabs = Create("ScrollingFrame", {
+Name = "Tabs",
+Position = UDim2.fromOffset(0, 70),
+Size = UDim2.new(1, 0, 1, -70),
+ScrollBarThickness = 0,
+Parent = sidebar,
+})
+Create.padding(tabs, 4, 10, 10, 10)
+Create.list(tabs, 4)
+self._sidebar.Frame = sidebar
+self._sidebar.Tabs = tabs
+local content = Create("CanvasGroup", { Name = "Content", BackgroundTransparency = 1, Parent = canvas })
+self._sidebar.Content = content
+local header = Create(
+"Frame",
+{ Name = "Header", Size = UDim2.new(1, 0, 0, 72), BackgroundTransparency = 1, Active = true, Parent = content }
+)
+self._sidebar.HeaderTitle = Create("TextLabel", {
+Name = "Title",
+Position = UDim2.fromOffset(24, 12),
+Size = UDim2.new(1, -330, 0, 28),
+Text = "",
+TextSize = 24,
+RichText = true,
+Font = theme:Get("Font"),
+TextColor3 = theme:Get("Text"),
+TextXAlignment = Enum.TextXAlignment.Left,
+TextTruncate = Enum.TextTruncate.AtEnd,
+Parent = header,
+})
+theme:Bind(self._sidebar.HeaderTitle, "TextColor3", "Text")
+self._sidebar.HeaderSub = Create("TextLabel", {
+Name = "Subtitle",
+Position = UDim2.fromOffset(24, 42),
+Size = UDim2.new(1, -330, 0, 16),
+Text = "",
+TextSize = 12,
+Font = theme:Get("Font"),
+TextColor3 = theme:Get("TextDim"),
+TextXAlignment = Enum.TextXAlignment.Left,
+Parent = header,
+})
+theme:Bind(self._sidebar.HeaderSub, "TextColor3", "TextDim")
+self:_createSearchBox(header, UDim2.fromOffset(220, 34), UDim2.new(1, -62, 0.5, 0), Vector2.new(1, 0.5), "pill-box")
+local close = Create("TextButton", {
+Name = "Close",
+AnchorPoint = Vector2.new(1, 0.5),
+Position = UDim2.new(1, -16, 0.5, 0),
+Size = UDim2.fromOffset(30, 30),
+Text = "×",
+TextSize = 22,
+TextColor3 = theme:Get("TextDim"),
+Parent = header,
+})
+theme:Bind(close, "TextColor3", "TextDim")
+self._maid:Give(close.MouseButton1Click:Connect(function()
+self:Close()
+end))
+self._maid:Give(close.MouseEnter:Connect(function()
+AnimationManager.Play(close, "Fast", { TextColor3 = theme:Get("Error") })
+end))
+self._maid:Give(close.MouseLeave:Connect(function()
+AnimationManager.Play(close, "Fast", { TextColor3 = theme:Get("TextDim") })
+end))
+local pages = Create("Frame", {
+Name = "Pages",
+Position = UDim2.fromOffset(0, 72),
+Size = UDim2.new(1, 0, 1, -72),
+BackgroundTransparency = 1,
+ClipsDescendants = true,
+Parent = content,
+})
+self._sidebar.PagesHost = pages
+local searchPage = Create("ScrollingFrame", {
+Name = "SearchResults",
+Size = UDim2.fromScale(1, 1),
+Visible = false,
+ScrollBarImageColor3 = theme:Get("Accent"),
+Parent = pages,
+})
+theme:Bind(searchPage, "ScrollBarImageColor3", "Accent")
+local searchList = Create("Frame", {
+Name = "List",
+Size = UDim2.new(1, 0, 0, 0),
+AutomaticSize = Enum.AutomaticSize.Y,
+BackgroundTransparency = 1,
+Parent = searchPage,
+})
+Create.padding(searchList, 6, 18, 14, 18)
+local searchLayout = Create.list(searchList, 4)
+theme:Bind(searchLayout, "Padding", function(t)
+return UDim.new(0, t.ModuleSpacing)
+end)
+self._sidebar.SearchPage = searchPage
+self._sidebar.SearchList = searchList
+self:_createEmptyLabel(
+pages,
+{ Position = UDim2.fromOffset(0, 40), Size = UDim2.new(1, 0, 0, 30), BackgroundTransparency = 1, ZIndex = 5 }
+)
+self:_layoutSidebar()
+local function makeHandle(name, anchor, position, size, axisX, axisY)
+local handle = Create(
+"TextButton",
+{ Name = name, AnchorPoint = anchor, Position = position, Size = size, ZIndex = 40, Parent = canvas }
+)
+local start = Vector2.zero
+local resizer = Resizer.new(handle, {
+OnStart = function()
+start = Vector2.new(self.Size.X.Offset, self.Size.Y.Offset)
+self:BringToFront()
+end,
+OnChange = function(dx, dy)
+local scale = math.max(self._scale, 0.01)
+self:_resizeTo(start.X + (axisX and dx / scale or 0), start.Y + (axisY and dy / scale or 0))
+end,
+OnEnd = function()
+self:_queueSave()
+end,
+})
+resizer.Enabled = self._resizable
+handle.Visible = self._resizable
+table.insert(self._handles, handle)
+table.insert(self._resizers, resizer)
+self._maid:Give(resizer)
+return handle
+end
+makeHandle("ResizeRight", Vector2.new(1, 0), UDim2.new(1, 0, 0, 0), UDim2.new(0, 5, 1, -18), true, false)
+makeHandle("ResizeBottom", Vector2.new(0, 1), UDim2.new(0, 0, 1, 0), UDim2.new(1, -18, 0, 5), false, true)
+local corner =
+makeHandle("ResizeCorner", Vector2.new(1, 1), UDim2.new(1, 0, 1, 0), UDim2.fromOffset(18, 18), true, true)
+self:_addGrip(corner)
+for _, handle in { brandBlock, header } do
+local dragger = Draggable.new(handle, holder, {
+Bounds = self.Container,
+OnDragStart = function()
+self:BringToFront()
+end,
+OnDragEnd = function()
+self:_queueSave()
+end,
+})
+self._maid:Give(dragger)
+self._dragger = dragger
+end
+self._maid:Give(canvas.InputBegan:Connect(function(input)
+if
+input.UserInputType == Enum.UserInputType.MouseButton1
+or input.UserInputType == Enum.UserInputType.Touch
+then
+self:BringToFront()
+end
+end))
+end
 function Window:_buildSidebar()
+if self.StyleData.Sidebar == "Brand" then
+return self:_buildSidebarBrand()
+end
 local theme = self.Theme
 local holder, canvas, shadow, surfaceStroke =
 self:_createSurface("Window", self.Size, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5))
@@ -6698,19 +7296,96 @@ end
 function Window:IsResizable(): boolean
 return self._resizable
 end
+local function escapeRich(text)
+text = string.gsub(text, "&", "&amp;")
+text = string.gsub(text, "<", "&lt;")
+return (string.gsub(text, ">", "&gt;"))
+end
+function Window:_updateHeader()
+local sidebar = self._sidebar
+if not sidebar or not sidebar.HeaderTitle then
+return
+end
+local theme = self.Theme
+local category = self._selected
+local hex = theme:Get("Accent"):ToHex()
+if self._query ~= "" then
+sidebar.HeaderTitle.Text = "<b>Search</b> results"
+local count = 0
+for _, module in self.Modules do
+if module.Frame.Visible then
+count += 1
+end
+end
+sidebar.HeaderSub.Text = count .. " modules found"
+elseif category then
+sidebar.HeaderTitle.Text = '<font color="#'
+.. hex
+.. '"><i>'
+.. escapeRich(category.Name)
+.. "</i></font> <b>Modules</b>"
+local total, enabled = 0, 0
+for _, module in category.Modules do
+total += 1
+if module.Enabled then
+enabled += 1
+end
+end
+sidebar.HeaderSub.Text = total .. " modules · " .. enabled .. " enabled"
+else
+sidebar.HeaderTitle.Text = escapeRich(self.Title)
+sidebar.HeaderSub.Text = ""
+end
+end
+function Window:_ensureGroup(name)
+self._groups = self._groups or {}
+if self._groups[name] then
+return self._groups[name]
+end
+local index = 0
+for _ in self._groups do
+index += 1
+end
+index += 1
+local theme = self.Theme
+local label = Create("TextLabel", {
+Name = "Group_" .. name,
+Size = UDim2.new(1, 0, 0, 22),
+Text = string.upper(name),
+TextSize = 10,
+Font = theme:Get("FontBold"),
+TextColor3 = theme:Get("TextDim"),
+TextXAlignment = Enum.TextXAlignment.Left,
+LayoutOrder = index * 1000,
+Parent = self._sidebar.Tabs,
+})
+Create.padding(label, 6, 0, 0, 10)
+theme:Bind(label, "TextColor3", "TextDim")
+self._groups[name] = { Index = index, Label = label, Count = 0 }
+return self._groups[name]
+end
 function Window:_createTab(category)
 local theme = self.Theme
+local brand = self._sidebar.Brand == true
 local tabs = self._sidebar.Tabs
+local order = #self.Categories
+if brand then
+local group = self:_ensureGroup(category.Group or "Modules")
+group.Count += 1
+order = group.Index * 1000 + group.Count
+end
 local button = Create("TextButton", {
 Name = "Tab_" .. category.Name,
-Size = UDim2.new(1, 0, 0, 32),
+Size = UDim2.new(1, 0, 0, brand and 36 or 32),
 BackgroundColor3 = theme:Get("Element"),
 BackgroundTransparency = 1,
-LayoutOrder = #self.Categories,
+LayoutOrder = order,
 Parent = tabs,
 })
-Visual.corner(theme, button, -2)
-local bar = Create("Frame", {
+Visual.corner(theme, button, brand and 0 or -2)
+local bar
+if not brand then
+bar = Create("Frame", {
 Name = "Bar",
 Position = UDim2.new(0, 0, 0.5, 0),
 AnchorPoint = Vector2.new(0, 0.5),
@@ -6720,7 +7395,8 @@ BackgroundTransparency = 1,
 Parent = button,
 })
 Create.pill(bar)
-local labelX = 14
+end
+local labelX = brand and 14 or 14
 local icon
 if category.Icon then
 icon = Visual.icon(button, category.Icon, category.IconSize, theme:Get("TextDim"), {
@@ -6732,7 +7408,7 @@ end
 local label = Create("TextLabel", {
 Name = "Label",
 Position = UDim2.fromOffset(labelX, 0),
-Size = UDim2.new(1, -labelX - 6, 1, 0),
+Size = UDim2.new(1, -labelX - (brand and 40 or 6), 1, 0),
 Text = category.Name,
 TextSize = 13,
 Font = theme:Get("Font"),
@@ -6741,7 +7417,22 @@ TextXAlignment = Enum.TextXAlignment.Left,
 TextTruncate = Enum.TextTruncate.AtEnd,
 Parent = button,
 })
-local tab = { Category = category, Button = button, Bar = bar, Label = label, Icon = icon, Hovered = false }
+local count
+if brand then
+count = Create("TextLabel", {
+Name = "Count",
+AnchorPoint = Vector2.new(1, 0.5),
+Position = UDim2.new(1, -12, 0.5, 0),
+Size = UDim2.fromOffset(30, 14),
+TextSize = 11,
+TextXAlignment = Enum.TextXAlignment.Right,
+Font = theme:Get("Font"),
+TextColor3 = theme:Get("TextDim"),
+Parent = button,
+})
+end
+local tab =
+{ Category = category, Button = button, Bar = bar, Label = label, Icon = icon, Count = count, Hovered = false }
 self._tabs[category] = tab
 self._maid:Give(button.MouseButton1Click:Connect(function()
 self:SelectCategory(category)
@@ -6754,18 +7445,39 @@ self._maid:Give(button.MouseLeave:Connect(function()
 tab.Hovered = false
 self:_renderTabs(true)
 end))
-category.Page.Parent = self._sidebar.Content
+category.Page.Parent = self._sidebar.PagesHost or self._sidebar.Content
 category.Page.Visible = false
 if not self._selected then
 self:SelectCategory(category)
 end
 self:_renderTabs(false)
+self:_refreshCounts()
 end
 function Window:_renderTabs(animated)
 local theme = self.Theme
 local preset = animated and "Fast" or "Instant"
+local brand = self._sidebar and self._sidebar.Brand
 for category, tab in self._tabs do
 local selected = category == self._selected
+if brand then
+AnimationManager.Play(tab.Button, preset, {
+BackgroundColor3 = selected and theme:Get("Accent") or theme:Get("Element"),
+BackgroundTransparency = selected and 0.12 or (tab.Hovered and 0.6 or 1),
+})
+AnimationManager.Play(tab.Label, preset, {
+TextColor3 = selected and Color3.new(1, 1, 1)
+or (tab.Hovered and theme:Get("Text") or theme:Get("TextDim")),
+})
+AnimationManager.Play(tab.Count, preset, {
+TextColor3 = selected and Color3.new(1, 1, 1) or theme:Get("TextDim"),
+})
+if tab.Icon then
+AnimationManager.Play(tab.Icon.Instance, preset, {
+[tab.Icon.Property] = selected and Color3.new(1, 1, 1)
+or (category.IconColor or theme:Get("TextDim")),
+})
+end
+else
 AnimationManager.Play(tab.Button, preset, {
 BackgroundColor3 = theme:Get("Element"),
 BackgroundTransparency = selected and 0.3 or (tab.Hovered and 0.7 or 1),
@@ -6782,8 +7494,10 @@ preset,
 )
 if tab.Icon then
 AnimationManager.Play(tab.Icon.Instance, preset, {
-[tab.Icon.Property] = selected and (category.IconColor or theme:Get("Accent")) or theme:Get("TextDim"),
+[tab.Icon.Property] = selected and (category.IconColor or theme:Get("Accent"))
+or theme:Get("TextDim"),
 })
+end
 end
 end
 end
@@ -6807,6 +7521,7 @@ self._selected = category
 self:_updatePages()
 self:_renderTabs(true)
 self:_pageTransition()
+self:_updateHeader()
 self:_updateEmpty()
 self:_queueSave()
 end
@@ -6816,23 +7531,22 @@ if not content or not self._open then
 return
 end
 local width = self:_sidebarWidth()
+local top = self._sidebar.Top or TITLEBAR_HEIGHT
 AnimationManager.Play(
 content,
 "Instant",
-{ GroupTransparency = 0.75, Position = UDim2.fromOffset(width + 14, TITLEBAR_HEIGHT) }
+{ GroupTransparency = 0.75, Position = UDim2.fromOffset(width + 14, top) }
 )
-AnimationManager.Play(
-content,
-"Expand",
-{ GroupTransparency = 0, Position = UDim2.fromOffset(width, TITLEBAR_HEIGHT) }
-)
+AnimationManager.Play(content, "Expand", { GroupTransparency = 0, Position = UDim2.fromOffset(width, top) })
 end
 function Window:_createPanel(category)
 local theme = self.Theme
 local width = self._panelWidth or self._defaultPanelWidth
+local hh = self._headerHeight
+local plain = self.StyleData.Panels.Header == "Plain"
 local holder, canvas, shadow, surfaceStroke = self:_createSurface(
 "Panel_" .. category.Name,
-UDim2.fromOffset(width, HEADER_HEIGHT),
+UDim2.fromOffset(width, hh),
 UDim2.fromOffset(20, 70),
 Vector2.zero
 )
@@ -6847,16 +7561,57 @@ Width = width,
 }
 local header = Create("Frame", {
 Name = "Header",
-Size = UDim2.new(1, 0, 0, HEADER_HEIGHT),
+Size = UDim2.new(1, 0, 0, hh),
 BackgroundColor3 = theme:Get("Header"),
+BackgroundTransparency = plain and 1 or 0,
 Active = true,
 Parent = canvas,
 })
+if not plain then
 theme:Bind(header, "BackgroundColor3", "Header")
 Visual.gradient(theme, header, 0.25)
+end
+local title
+if plain then
+local group = Create("Frame", {
+Name = "Group",
+AnchorPoint = Vector2.new(0.5, 0.5),
+Position = UDim2.fromScale(0.5, 0.5),
+Size = UDim2.new(),
+AutomaticSize = Enum.AutomaticSize.XY,
+BackgroundTransparency = 1,
+Parent = header,
+})
+local layout = Create.list(group, 7, true)
+layout.VerticalAlignment = Enum.VerticalAlignment.Center
+if category.Icon then
+record.Icon = Visual.icon(
+group,
+category.Icon,
+category.IconSize,
+category.IconColor or theme:Get("Accent"),
+{ LayoutOrder = 1 }
+)
+if not category.IconColor then
+theme:Bind(record.Icon.Instance, record.Icon.Property, "Accent")
+end
+end
+title = Create("TextLabel", {
+Name = "Title",
+Size = UDim2.fromOffset(0, 20),
+AutomaticSize = Enum.AutomaticSize.X,
+Text = category.Name,
+TextSize = 14,
+Font = theme:Get("FontBold"),
+TextColor3 = theme:Get("Text"),
+LayoutOrder = 2,
+Parent = group,
+})
+else
 local titleOffset = 0
 if category.Icon then
-record.Icon = Visual.icon(header, category.Icon, category.IconSize, category.IconColor or theme:Get("Accent"), {
+record.Icon =
+Visual.icon(header, category.Icon, category.IconSize, category.IconColor or theme:Get("Accent"), {
 AnchorPoint = Vector2.new(0, 0.5),
 Position = UDim2.new(0, 10, 0.5, 0),
 })
@@ -6865,7 +7620,7 @@ theme:Bind(record.Icon.Instance, record.Icon.Property, "Accent")
 end
 titleOffset = category.IconSize + 10
 end
-local title = Create("TextLabel", {
+title = Create("TextLabel", {
 Name = "Title",
 Position = UDim2.fromOffset(10 + titleOffset, 0),
 Size = UDim2.new(1, -84 - titleOffset, 1, 0),
@@ -6877,12 +7632,13 @@ TextXAlignment = Enum.TextXAlignment.Center,
 TextTruncate = Enum.TextTruncate.AtEnd,
 Parent = header,
 })
-theme:Bind(title, "TextColor3", "Text")
-theme:Bind(title, "Font", "FontBold")
-theme:Bind(title, "TextSize", "HeaderTextSize")
 theme:Bind(title, "TextXAlignment", function(t)
 return (category.Icon or t.HeaderAlign == "Left") and Enum.TextXAlignment.Left or Enum.TextXAlignment.Center
 end)
+end
+theme:Bind(title, "TextColor3", "Text")
+theme:Bind(title, "Font", "FontBold")
+theme:Bind(title, "TextSize", "HeaderTextSize")
 local chevron = Create("TextButton", {
 Name = "Collapse",
 AnchorPoint = Vector2.new(1, 0.5),
@@ -6892,6 +7648,7 @@ Text = "›",
 TextSize = 20,
 Rotation = 90,
 TextColor3 = theme:Get("TextDim"),
+Visible = not plain,
 Parent = header,
 })
 theme:Bind(chevron, "TextColor3", "TextDim")
@@ -6899,7 +7656,7 @@ record.Chevron = chevron
 record.Count = Create("TextLabel", {
 Name = "Count",
 AnchorPoint = Vector2.new(1, 0.5),
-Position = UDim2.new(1, -34, 0.5, 0),
+Position = UDim2.new(1, plain and -12 or -34, 0.5, 0),
 Size = UDim2.fromOffset(40, 14),
 TextSize = 11,
 TextXAlignment = Enum.TextXAlignment.Right,
@@ -6908,8 +7665,8 @@ TextColor3 = theme:Get("TextDim"),
 Parent = header,
 })
 theme:Bind(record.Count, "TextColor3", "TextDim")
-category.Page.Position = UDim2.fromOffset(0, HEADER_HEIGHT)
-category.Page.Size = UDim2.new(1, 0, 1, -HEADER_HEIGHT)
+category.Page.Position = UDim2.fromOffset(0, hh)
+category.Page.Size = UDim2.new(1, 0, 1, -hh)
 category.Page.Parent = canvas
 category.Page.Visible = true
 self:_accentLine(canvas, UDim2.new(0, 0, 1, 0), Vector2.new(0, 1))
@@ -6922,7 +7679,7 @@ local body = record.Collapsed and 0 or math.min(content, self._maxPanelHeight)
 AnimationManager.Play(
 holder,
 animated and "Normal" or "Instant",
-{ Size = UDim2.fromOffset(record.Width, HEADER_HEIGHT + body) }
+{ Size = UDim2.fromOffset(record.Width, hh + body) }
 )
 end
 self._maid:Give(category.List:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
@@ -6932,6 +7689,22 @@ self._maid:Give(chevron.MouseButton1Click:Connect(function()
 self:_setCollapsed(record, not record.Collapsed, true)
 self:_queueSave()
 end))
+if plain then
+local lastClick = 0
+self._maid:Give(header.InputBegan:Connect(function(input)
+if
+input.UserInputType == Enum.UserInputType.MouseButton1
+or input.UserInputType == Enum.UserInputType.Touch
+then
+local now = os.clock()
+if now - lastClick < 0.35 then
+self:_setCollapsed(record, not record.Collapsed, true)
+self:_queueSave()
+end
+lastClick = now
+end
+end))
+end
 local function bringToFront()
 self._zCounter += 1
 holder.ZIndex = self._zCounter
@@ -7023,7 +7796,7 @@ if count == 0 then
 count, total = 1, self._defaultPanelWidth
 end
 local contentWidth = total + (count - 1) * PANEL_GAP + 40
-local contentHeight = self._maxPanelHeight + HEADER_HEIGHT + 130
+local contentHeight = self._maxPanelHeight + self._headerHeight + 130
 scale = math.min(viewport.X / contentWidth, viewport.Y / contentHeight, 1.15)
 else
 local size = self._initialSize
@@ -7292,6 +8065,7 @@ end
 self:_updatePages()
 self:_refreshPanelVisibility()
 self:_updateEmpty()
+self:_updateHeader()
 end
 function Window:SetSearchOptions(options)
 self:Search(self._query, options)
@@ -7340,6 +8114,9 @@ function Window:_animTargets()
 local targets = {}
 if self._searchHolder then
 table.insert(targets, self._searchHolder)
+end
+if self._paletteHolder then
+table.insert(targets, self._paletteHolder)
 end
 if self._sidebar then
 table.insert(targets, self._sidebar)
@@ -7501,10 +8278,15 @@ local record = self._panels[category]
 if record and record.Count then
 record.Count.Text = (self._showCounts and total > 0) and (enabled .. "/" .. total) or ""
 end
+local tab = self._tabs[category]
+if tab and tab.Count then
+tab.Count.Text = self._showCounts and tostring(#category.Modules) or ""
+end
 end
 if self._sidebar and self._sidebar.Footer then
 self._sidebar.Footer.Text = self._showCounts and (enabledAll .. " / " .. totalAll .. " enabled") or ""
 end
+self:_updateHeader()
 end)
 end
 function Window:SetShowCounts(enabled: boolean)
@@ -7525,8 +8307,23 @@ end
 function Window:SetTooltipsEnabled(enabled: boolean)
 self.Tooltip:SetEnabled(enabled)
 end
+function Window:_reapplyStyle(except)
+local patch = {}
+for key, value in self.StyleData.Theme do
+if not (except and except[key] ~= nil) then
+patch[key] = value
+end
+end
+if next(patch) then
+self.Theme:Patch(patch)
+end
+if self._styleValues then
+self.Theme:Patch(self._styleValues)
+end
+end
 function Window:SetTheme(theme: string | Types.PartialTheme)
 self.Theme:SetTheme(theme)
+self:_reapplyStyle(type(theme) == "table" and theme or nil)
 end
 function Window:SetAccent(color: Color3)
 self.Theme:SetAccent(color)
@@ -7877,6 +8674,7 @@ module:SetFavorite(false)
 module:SetPinned(false)
 end
 self.Theme:Restore()
+self:_reapplyStyle()
 AnimationManager.ResetConfig()
 self:SetScale(nil)
 self:SetTooltipsEnabled(true)
@@ -7979,6 +8777,10 @@ Set: (self: StorageAdapter, key: string, value: string) -> (),
 Remove: ((self: StorageAdapter, key: string) -> ())?,
 }
 type WindowOptions = {
+Style: ("Classic" | "Flat" | "Glass")?,
+Palette: any?,
+Icon: (string | number)?,
+ThemeValues: { [string]: any }?,
 Loader: any?,
 OpenAnimation: ("Rise" | "Drop" | "Slide" | "Fade")?,
 MinSize: UDim2?,
@@ -8005,6 +8807,7 @@ DisplayOrder: number?,
 Parent: Instance?,
 }
 type CategoryOptions = {
+Group: string?,
 Icon: string?,
 IconSize: number?,
 IconColor: Color3?,
@@ -8111,6 +8914,8 @@ Type: NotifyType?,
 }
 type HUDPosition = "TopLeft" | "TopRight" | "BottomLeft" | "BottomRight"
 type HUDOptions = {
+Style: ("Block" | "Pill")?,
+CornerRadius: number?,
 Name: string?,
 Font: Enum.Font?,
 Spacing: number?,
@@ -8555,6 +9360,7 @@ local HUD = require(script.Core.HUD)
 local Notifications = require(script.Core.Notifications)
 local Tooltip = require(script.Core.Tooltip)
 local Loader = require(script.Core.Loader)
+local Styles = require(script.Core.Styles)
 local Config = require(script.Core.Config)
 local Base = require(script.Components.Base)
 local UIShadow = require(script.Components.UIShadow)
@@ -8621,6 +9427,9 @@ return self.Theme:GetNames()
 end
 function Library:RegisterComponent(name: string, constructor)
 Module.RegisterComponent(name, constructor)
+end
+function Library:GetStyles()
+return table.clone(Styles.Names)
 end
 function Library:CreateLoader(options)
 local loader = Loader.new(self, options)

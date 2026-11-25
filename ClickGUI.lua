@@ -2519,7 +2519,7 @@ end
 __functions[__n_Core_Config] = function(script, require)
 local HttpService = game:GetService("HttpService")
 local Config = {}
-Config.Version = 2
+Config.Version = 3
 Config.Storage = {}
 function Config.Storage.Memory()
 local store = {}
@@ -2643,6 +2643,14 @@ if type(out[key]) ~= "table" then
 out[key] = {}
 end
 end
+if version < 3 and type(out.HUD) == "table" then
+for _, hud in out.HUD do
+if type(hud) == "table" then
+hud.GradientFrom = nil
+hud.GradientTo = nil
+end
+end
+end
 out.Legacy = version < 2
 out.Version = Config.Version
 return out
@@ -2654,8 +2662,17 @@ end
 local ok, err = pcall(adapter.Set, adapter, key, text)
 if not ok then
 warn("[ClickGUI] Storage write failed: " .. tostring(err))
+return false
 end
-return ok
+if Config.read(adapter, key) ~= text then
+warn(
+"[ClickGUI] Storage did not keep '"
+.. tostring(key)
+.. "': the write ran but reading it back gave something else. Check writefile/readfile/isfile."
+)
+return false
+end
+return true
 end
 function Config.read(adapter, key)
 if not adapter then
@@ -5109,6 +5126,8 @@ __functions[__n_Core_Settings] = function(script, require)
 local Config = require(script.Parent.Config)
 local ThemeManager = require(script.Parent.ThemeManager)
 local AnimationManager = require(script.Parent.AnimationManager)
+local TargetHUD = require(script.Parent.TargetHUD)
+local Watermark = require(script.Parent.Watermark)
 local Settings = {}
 local FONTS = {
 "Gotham",
@@ -5126,8 +5145,148 @@ local FONTS = {
 local function round(value, step)
 return math.floor(value / step + 0.5) * step
 end
+local function buildWidget(category, widget, kind)
+local isTarget = kind == "TargetHUD"
+local name = (isTarget and "Target HUD - " or "Watermark - ") .. tostring(widget.Name)
+local m = category:CreateModule({
+Name = name,
+Description = isTarget and "Style, size, position and debug" or "Text, position, colors and size",
+Toggleable = false,
+ShowKeybind = false,
+Expanded = false,
+})
+m:CreateToggle({
+Name = "Visible",
+Default = widget:IsVisible(),
+Callback = function(value)
+widget:SetVisible(value)
+end,
+})
+m:CreateDropdown({
+Name = "Position",
+Options = isTarget and TargetHUD.Positions or Watermark.Positions,
+Default = widget._position,
+Callback = function(value)
+widget:SetPosition(value)
+end,
+})
+m:CreateToggle({
+Name = "Edit Position (drag)",
+Default = false,
+Tooltip = "Drag the widget anywhere, then press Done editing",
+Callback = function(value)
+widget:SetEditable(value)
+end,
+})
+m:CreateButton({
+Name = "Reset Position",
+Callback = function()
+widget:ResetPosition()
+end,
+})
+if isTarget then
+m:CreateDropdown({
+Name = "Style",
+Options = { "Card", "Compact", "Minimal" },
+Default = widget._style,
+Callback = function(value)
+widget:SetStyle(value)
+end,
+})
+m:CreateSlider({
+Name = "Width",
+Min = 140,
+Max = 500,
+Default = widget._width,
+Increment = 5,
+Suffix = " px",
+Callback = function(value)
+widget:SetWidth(value)
+end,
+})
+m:CreateSlider({
+Name = "Auto Hide (0 = never)",
+Min = 0,
+Max = 30,
+Default = widget._autoHide or 0,
+Increment = 1,
+Suffix = " s",
+Callback = function(value)
+widget:SetAutoHide(value > 0 and value or nil)
+end,
+})
+m:CreateDropdown({
+Name = "Main Bar Color",
+Options = { "Health", "Accent" },
+Default = "Health",
+Callback = function(value)
+widget:SetBarColor(value)
+end,
+})
+m:CreateToggle({
+Name = "Debug Lines (FPS / Ping / Memory)",
+Default = widget:IsDebug(),
+Callback = function(value)
+widget:SetDebug(value)
+end,
+})
+else
+m:CreateTextbox({
+Name = "Text",
+Default = widget._text,
+Placeholder = "{fps} fps | {time}",
+Callback = function(text)
+widget:SetText(text)
+end,
+})
+m:CreateSlider({
+Name = "Text Size",
+Min = 8,
+Max = 32,
+Default = widget._textSize,
+Increment = 1,
+Callback = function(value)
+widget:SetTextSize(value)
+end,
+})
+m:CreateToggle({
+Name = "Background",
+Default = widget._background,
+Callback = function(value)
+widget:SetBackground(value)
+end,
+})
+m:CreateSlider({
+Name = "Background Opacity",
+Min = 0,
+Max = 100,
+Default = math.floor((1 - widget._backgroundTransparency) * 100 + 0.5),
+Increment = 5,
+Suffix = "%",
+Callback = function(value)
+widget:SetBackground(widget._background, 1 - value / 100)
+end,
+})
+m:CreateColorPicker({
+Name = "Custom Color",
+Default = widget._color or Color3.new(1, 1, 1),
+Callback = function(color)
+widget:SetColor(color)
+end,
+})
+m:CreateButton({
+Name = "Use Theme Colors",
+Callback = function()
+widget:SetColor(nil)
+widget:SetGradient(nil)
+end,
+})
+end
+return m
+end
 function Settings.build(window, name, options)
-local sections = options.Sections or { "Interface", "Appearance", "Animations", "Notifications", "HUD", "Config" }
+local sections = options.Sections
+or { "Interface", "Appearance", "Animations", "Notifications", "HUD", "Widgets", "Config" }
 local wanted = {}
 for _, section in sections do
 wanted[section] = true
@@ -5656,6 +5815,12 @@ Callback = function()
 hud:ResetPosition()
 end,
 })
+end
+end
+if wanted.Widgets then
+for widget, kind in window._widgets do
+local m = buildWidget(category, widget, kind)
+modules[m.Name] = m
 end
 end
 if wanted.Config then
@@ -7449,6 +7614,10 @@ ZIndex = 2,
 Parent = self.Root,
 })
 theme:Bind(self.Card, "BackgroundColor3", "Panel")
+self.Root.AutomaticSize = Enum.AutomaticSize.None
+self._maid:Give(self.Card:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+self.Root.Size = UDim2.fromOffset(self.Card.AbsoluteSize.X, self.Card.AbsoluteSize.Y)
+end))
 local corner = Instance.new("UICorner")
 corner.Parent = self.Card
 if self._rounded then
@@ -10013,7 +10182,8 @@ adapter == nil or (type(adapter.Get) == "function" and type(adapter.Set) == "fun
 self.Storage = adapter
 end
 function Window:_storageKey(suffix)
-return "ClickGUI/" .. self._configKey .. "/" .. suffix
+local safe = string.gsub(tostring(self._configKey), "[^%w_%-]", "_")
+return "ClickGUI_" .. safe .. "_" .. string.gsub(tostring(suffix), "/", "_")
 end
 function Window:_queueSave()
 if not self._autoSave or not self.Storage or self._destroyed then
@@ -10496,15 +10666,15 @@ if self._autoSaveConfig and self.Storage then
 pcall(self.SaveConfig, self)
 end
 self._autoToken += 1
-for widget in table.clone(self._widgets) do
-pcall(widget.Detach, widget, self)
-end
 self._saveToken += 1
 if self._open then
 self._unlock.Modal = false
 end
 for hud in table.clone(self._huds) do
 hud:Detach(self)
+end
+for widget in table.clone(self._widgets) do
+pcall(widget.Destroy, widget)
 end
 for _, category in table.clone(self.Categories) do
 category:Destroy()

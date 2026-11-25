@@ -1,72 +1,74 @@
 --[[
-	EJEMPLO COMPLETO DE ClickGUI 1.2.0 (usa TODAS las funciones, incluidas las nuevas)
+	EJEMPLO COMPLETO DE ClickGUI (usa TODAS las funciones de la libreria)
 
 	Carga:  loadstring(game:HttpGet(URL))()
+	Cambia LAYOUT entre "Panels" y "Sidebar" para ver los dos disenos.
 	Tecla para abrir/cerrar: RightShift.   Ctrl+F enfoca la busqueda.
-	Favoritos: pulsa la estrella (☆ -> ★ amarilla) de cada modulo. Shift + estrella = fijar (pin).
-
-	NOVEDADES DE ESTA VERSION (marcadas con [NUEVO]):
-	  - Encrypt / EncryptNames        : GUI en CoreGui + nombres aleatorios con caracteres raros
-	  - Estrella de favorito          : en cada modulo
-	  - Watermark                     : texto / logo, posicion y color propios
-	  - TargetHUD                     : Target / Info / Debug, con Track, Bind, Update...
-	  - AutoSave / AutoLoad / Perfiles: con slider de intervalo en Settings > Config
-	  - Config ampliada               : guarda notificaciones, ventana, watermarks, TargetHUDs
-	  - Notificaciones sin solaparse  : Width, Scale, Margin configurables
-	  - Estilo Flat corregido         : ya no sale en blanco
+	Click del medio en un modulo = favorito, Shift + click del medio = fijado (pinned).
 ]]
 
 local URL = "https://raw.githubusercontent.com/ELPAPIMC/ClickGui/refs/heads/main/ClickGUI.lua"
 local ClickGUI = loadstring(game:HttpGet(URL))()
 
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-
-local LAYOUT = "Panels" -- "Panels" | "Sidebar"
+-- ============================================================================
+-- ESTILOS (Style) - el aspecto de la GUI. Se elige al crear la ventana.
+-- ============================================================================
+--   "Classic" : tarjetas con degradado y switch (el estilo original)
+--   "Flat"    : como las capturas de paneles oscuros: filas planas sin tarjetas, el modulo activo
+--               queda resaltado, la tecla se ve como [R], puntitos si tiene ajustes (click), barra de
+--               colores arriba (Palette) y buscador en forma de pildora abajo. Combina con tema "Mocha" o "Ink".
+--   "Glass"   : ventana tipo "Prestige" (con Layout = "Sidebar"): barra lateral con logo, secciones
+--               (Group), contador por categoria, titulo grande "<Categoria> Modules", buscador arriba a la
+--               derecha y tarjetas grandes con descripcion + chevron + switch. Combina con tema "Midnight".
+-- Los layouts siguen siendo solo dos: "Panels" y "Sidebar". El estilo cambia su apariencia.
+-- Temas incluidos: Violet, Ocean, Crimson, Emerald, Sunset, Rose, Mocha, Midnight, Ink, Mono, Light (+ los tuyos)
+local LAYOUT = "Panels"
 local STYLE = "Flat" -- "Classic" | "Flat" | "Glass"
 local THEME = "Mocha"
-local ICON = "⚔" -- emoji, numero de imagen o "rbxassetid://..."
 
 -- ============================================================================
--- 1. CONFIGURACION GLOBAL (antes de crear ventanas / loader)
+-- COMO FUNCIONAN LOS ICONOS (Icon = ...)
+-- ============================================================================
+-- Category:  { Icon = ..., IconSize = 16, IconColor = Color3 }   -> sale en el encabezado del panel / pestana del sidebar
+-- Module:    { Icon = ..., IconSize = 14, IconActiveColor, IconInactiveColor } -> sale a la izquierda del nombre del modulo
+--
+-- "Icon" acepta 3 formas (usa la que prefieras):
+--   1) Emoji o texto corto, SIN assets:   Icon = "⚔"   Icon = "🏃"   Icon = "★"   Icon = "FX"
+--   2) Numero de un asset de IMAGEN:      Icon = 7733715400
+--   3) Texto "rbxassetid://ID":           Icon = "rbxassetid://7733715400"
+-- IMPORTANTE: para imagenes necesitas el ID de la IMAGEN (Creator Hub > Assets > Images),
+-- no el ID de un Decal. Los emojis/texto cambian de color con IconColor / IconActiveColor;
+-- los emojis a color mantienen su color original.
+-- Despues puedes cambiarlo: Module:SetIcon("🔥")
+local ICON = "⚔" -- cambia por un emoji, un numero o "rbxassetid://..."
+
+-- ============================================================================
+-- 1. CONFIGURACION GLOBAL (antes de crear ventanas)
 -- ============================================================================
 
--- 1.1 [NUEVO] Encrypt: TODO lo que cree la libreria (ventanas, HUD, loader, notificaciones,
---     watermark, TargetHUD) va a gethui()/CoreGui. EncryptNames: nombres raros y aleatorios.
---     Hazlo ANTES de crear el Loader para que tambien quede protegido.
---     Tambien puedes ponerlo como opciones de CreateWindow (Encrypt / EncryptNames).
---     Si CoreGui no esta disponible (ej. Studio) avisa y usa PlayerGui.
-ClickGUI:SetEncrypt(true, true) -- (enabled, names). nil deja un valor sin cambiar: SetEncrypt(nil, false)
-print("Encrypt:", ClickGUI.Encrypt, "EncryptNames:", ClickGUI.EncryptNames)
-
--- 1.2 Animaciones
+-- 1.1 Animaciones: Enabled (global), Speed (0.1 - 5), Preset: Smooth | Snappy | Bouncy | Soft | Linear
 ClickGUI:SetAnimationConfig({ Enabled = true, Speed = 1, Preset = "Smooth" })
+print("Animaciones:", ClickGUI:GetAnimationConfig().Preset)
 
--- 1.3 Almacenamiento (necesario para AutoSave / AutoLoad / perfiles).
---     Usa writefile/readfile si existen (executor); si no, guarda en un atributo del jugador.
-local hasFiles = typeof(writefile) == "function" and typeof(readfile) == "function" and typeof(isfile) == "function"
-if hasFiles then
-	if typeof(makefolder) == "function" and typeof(isfolder) == "function" and not isfolder("MyClient") then
-		makefolder("MyClient")
-	end
-	local function path(key)
-		return "MyClient/" .. string.gsub(key, "[^%w_%-]", "_") .. ".json"
-	end
-	ClickGUI:SetStorage(ClickGUI.Storage.Custom(function(key)
-		return isfile(path(key)) and readfile(path(key)) or nil
-	end, function(key, value)
-		writefile(path(key), value)
-	end, function(key)
-		if typeof(delfile) == "function" and isfile(path(key)) then
-			delfile(path(key))
-		end
-	end))
-else
-	ClickGUI:SetStorage(ClickGUI.Storage.Attribute(Players.LocalPlayer))
-	-- ClickGUI:SetStorage(ClickGUI.Storage.Memory()) -- solo durante la sesion
-end
+-- 1.2 Almacenamiento (persistencia). Roblox no tiene archivos en LocalScripts normales,
+--     asi que usas un "adapter". Incluidos: Memory (solo sesion), Attribute (guarda en un Instance).
+--     Tambien puedes hacer el tuyo con Storage.Custom(get, set, remove) (ej. writefile/readfile).
+local Players = game:GetService("Players")
+ClickGUI:SetStorage(ClickGUI.Storage.Attribute(Players.LocalPlayer))
+-- Si tu executor tiene writefile/readfile, guarda en archivos reales (carpeta "MyClient"):
+-- ClickGUI:SetStorage(ClickGUI.Storage.File("MyClient"))
+-- ClickGUI:SetStorage(ClickGUI.Storage.Memory())
+-- ClickGUI:SetStorage(ClickGUI.Storage.Custom(
+--     function(key) return isfile and isfile(key .. ".json") and readfile(key .. ".json") or nil end,
+--     function(key, value) if writefile then writefile(key .. ".json", value) end end,
+--     function(key) if delfile and isfile and isfile(key .. ".json") then delfile(key .. ".json") end end
+-- ))
 
--- 1.4 Tema propio
+-- 1.3 Tema propio. Campos: Background, Panel, Header, Module, ModuleHover, Element, ElementHover,
+--     Accent, AccentDark, Text, TextDim, Stroke, Success, Warning, Error, Info,
+--     Transparency, CornerRadius, Border, BorderThickness, BorderTransparency,
+--     Gradients, GradientRotation, ShadowPreset (Off/Soft/Medium/Strong), ShadowOpacity, ShadowColor,
+--     Font, FontBold
 ClickGUI:RegisterTheme("Neon", {
 	Accent = Color3.fromRGB(0, 255, 170),
 	AccentDark = Color3.fromRGB(0, 140, 255),
@@ -86,34 +88,43 @@ ClickGUI:RegisterTheme("Neon", {
 })
 print("Temas:", table.concat(ClickGUI:GetThemes(), ", "))
 
--- 1.5 [NUEVO] Notificaciones: ahora con Width, Scale y Margin (y se guardan en la config)
-ClickGUI:SetNotificationConfig({
-	Position = "BottomRight", -- BottomRight|BottomLeft|BottomCenter|TopRight|TopLeft|TopCenter
-	Style = "Modern", -- Modern | Minimal | Banner
-	MaxVisible = 5,
-	Width = 300,
-	Duration = 4,
-	Margin = 16,
-	Scale = 1,
-})
-print("Config de notificaciones:", ClickGUI:GetNotificationConfig().Style)
+-- 1.4 Notificaciones: Position (BottomRight|BottomLeft|BottomCenter|TopRight|TopLeft|TopCenter),
+--     Style (Modern|Minimal|Banner), MaxVisible, Width, Duration, Margin
+ClickGUI:SetNotificationConfig({ Position = "BottomRight", Style = "Modern", MaxVisible = 5, Width = 300, Duration = 4 })
 
--- 1.6 Pantalla de carga
+-- 1.5 PANTALLA DE CARGA (opcional). Estilos: Bar | Spinner | Dots | Pulse | Terminal | Minimal
+--     La pantalla SOLO termina cuando se cumple todo lo que pidas:
+--       Tasks      = pasos que TU marcas como completados (Loader:CompleteTask("nombre"))
+--       Conditions = nombres integrados ("GameLoaded", "Character", "Camera", "PlayerGui")
+--                    o funciones que devuelven true cuando algo esta listo
+--       Mode       = "All" (todo debe cumplirse) | "Any" (basta con UNO: "esto o esto")
+--       MinTime    = tiempo minimo visible, Timeout = tiempo maximo (TimeoutAction "Finish" o "Fail")
 local Loader = ClickGUI:CreateLoader({
 	Title = "My Client",
 	Subtitle = "Preparando todo...",
-	Logo = "⚡",
-	Style = "Bar", -- Bar | Spinner | Dots | Pulse | Terminal | Minimal
+	Logo = "⚡", -- mismo formato que Icon (emoji, numero o rbxassetid://)
+	Style = "Bar",
 	MinTime = 2,
 	Mode = "All",
 	Tasks = { "Cargando modulos", "Leyendo configuracion" },
-	Conditions = { "GameLoaded" },
+	Conditions = {
+		"GameLoaded",
+		function()
+			return true
+		end,
+	},
 	Timeout = 25,
 	TimeoutAction = "Finish",
 	OnTimeout = function()
 		warn("La carga tardo demasiado")
 	end,
 })
+-- Loader:SetProgress(0.5)   -- progreso manual (0-1)
+-- Loader:SetStatus("texto") -- texto de estado
+-- Loader:AddTask("otra")    -- devuelve { Complete = function }
+-- Loader:AddCondition(function() return workspace:FindFirstChild("Map") ~= nil end)
+-- Loader:Finish() / Loader:Fail("motivo") / Loader:Wait() / Loader:IsFinished() / Loader:Destroy()
+-- Loader.Finished:Connect(function() ... end)
 
 -- ============================================================================
 -- 2. VENTANA
@@ -121,216 +132,148 @@ local Loader = ClickGUI:CreateLoader({
 local Window = ClickGUI:CreateWindow({
 	Title = "My Client",
 	Subtitle = "ClickGUI",
-	Layout = LAYOUT,
-	Style = STYLE,
-	Icon = "⚡",
-	Palette = true, -- Flat: barra de colores. true | false | { "Violet", "Mocha", Color3.fromRGB(255, 0, 100) }
-	ThemeValues = { CornerRadius = 14 },
+	Layout = LAYOUT, -- "Panels" | "Sidebar" (son los unicos dos)
+	Style = STYLE, -- Classic | Flat | Glass
+	Icon = "⚡", -- logo de marca (solo Glass): emoji, numero o rbxassetid://
+	Palette = true, -- Flat: barra de colores arriba. true = todos los temas | false = ocultar |
+	--               { "Violet", "Mocha", Color3.fromRGB(255, 0, 100) } = tu lista (nombres de tema o colores de acento)
+	ThemeValues = { CornerRadius = 14 }, -- valores del tema que quieres forzar por encima del estilo
 	ToggleKey = Enum.KeyCode.RightShift,
 	Theme = THEME,
-	StartOpen = true,
+	-- Accent = Color3.fromRGB(255, 0, 100),
+	-- Scale = 1,                              -- nil = escala automatica
+	StartOpen = true, -- con Loader, la ventana se abre sola cuando la carga termina
 	Loader = Loader,
-	OpenAnimation = "Rise", -- Rise | Drop | Slide | Fade
-	ShowCounts = true,
+	OpenAnimation = "Rise", -- Rise | Drop | Slide | Fade (tambien Window:SetOpenAnimation)
+	ShowCounts = true, -- contador de modulos activos en paneles / sidebar
 	Backdrop = true,
 	Tooltips = true,
 	Resizable = true,
-	Size = UDim2.fromOffset(700, 460), -- Sidebar
-	MinSize = UDim2.fromOffset(480, 320),
-	MaxSize = UDim2.fromOffset(1000, 750),
-	PanelWidth = 200, -- Panels
-	MaxPanelHeight = 400, -- Panels
-	SearchKey = Enum.KeyCode.F,
-	ConfigKey = "MyClient", -- nombre base del guardado
-
-	-- [NUEVO] seguridad (equivale a ClickGUI:SetEncrypt)
-	Encrypt = true, -- GUI en CoreGui / gethui
-	EncryptNames = true, -- nombres aleatorios con caracteres raros
-
-	-- [NUEVO] guardado automatico
-	AutoSave = true, -- guarda el perfil actual cada AutoSaveInterval segundos (y el layout al moverlo)
-	AutoSaveInterval = 30, -- segundos (5 - 3600). Tambien hay slider en Settings > Config
-	AutoLoad = true, -- carga el perfil actual al iniciar
-	Profile = "default", -- perfil con el que se guarda / carga
+	Size = UDim2.fromOffset(700, 460), -- Sidebar: tamano inicial
+	MinSize = UDim2.fromOffset(480, 320), -- Sidebar: minimo
+	MaxSize = UDim2.fromOffset(1000, 750), -- Sidebar: maximo
+	PanelWidth = 200, -- Panels: ancho inicial de cada columna
+	MaxPanelHeight = 400, -- Panels: alto maximo antes de hacer scroll
+	SearchKey = Enum.KeyCode.F, -- Ctrl + F enfoca la busqueda (nil lo desactiva)
+	ConfigKey = "MyClient", -- nombre usado para guardar
+	AutoSave = true, -- guarda posiciones/tamanos solo y los carga al abrir
+	-- Config automatica (tambien se cambia desde Settings > Config, y esas preferencias se recuerdan):
+	AutoSaveConfig = true, -- guarda TODA la config cada N segundos, al cerrar el menu y al descargar
+	AutoSaveInterval = 60, -- cada cuantos segundos (minimo 5)
+	AutoLoadConfig = true, -- carga la config (o el perfil de inicio) la primera vez que se abre el menu
+	Profile = "Default", -- perfil actual (ver Window:SaveProfile / LoadProfile mas abajo)
+	-- Ocultar la GUI: Encrypt = todo (ventana, HUD, notificaciones, loader, widgets) dentro de CoreGui
+	-- (si el executor no deja, usa gethui y si no PlayerGui). EncryptNames = nombres raros en cada instancia.
+	Encrypt = false,
+	EncryptNames = false,
+	-- Estrella de favorito (clic en la estrella de cada modulo). Puedes cambiar los iconos:
+	FavoriteIcons = {
+		On = "rbxassetid://10734966097",
+		Hover = "rbxassetid://10734965897",
+		Off = "rbxassetid://10734966097",
+	},
 })
 
 -- ============================================================================
--- 3. HUD (ArrayList)
+-- 3. HUD (ArrayList independiente)
 -- ============================================================================
 local HUD = ClickGUI:CreateHUD({
 	Name = "MainHUD",
-	Style = "Pill",
-	Position = "TopRight",
+	Style = "Pill", -- "Block" (barras) | "Pill" (pastillas redondeadas como la captura del ArrayList)
+	Position = "TopRight", -- TopLeft | TopRight | BottomLeft | BottomRight
 	Offset = Vector2.new(8, 8),
 	TextSize = 16,
 	Font = Enum.Font.GothamBold,
 	Spacing = 1,
-	Sort = "Length",
+	Sort = "Length", -- Length | Alphabetical | None
 	Background = true,
+	BackgroundColor = Color3.fromRGB(0, 0, 0),
 	BackgroundTransparency = 0.45,
-	AccentBar = "Right",
-	ColorMode = "Gradient",
+	TextTransparency = 0,
+	AccentBar = "Right", -- Left | Right | None
+	Border = false,
+	BorderThickness = 1,
+	ColorMode = "Gradient", -- Accent | Gradient | Rainbow | Static
 	GradientFrom = Color3.fromRGB(0, 255, 170),
 	GradientTo = Color3.fromRGB(0, 140, 255),
 	GradientSpeed = 0.2,
 	ShowInfo = true,
-	Animation = "Both",
+	Animation = "Both", -- Both | Grow | Fade | None
 })
-HUD:Attach(Window) -- muestra los modulos activados
-HUD:AddEntry("Watermark", "v" .. ClickGUI.Version)
+HUD:Attach(Window) -- muestra automaticamente los modulos activados
+
+HUD:AddEntry("Watermark", "v1.1") -- entrada manual
 
 -- ============================================================================
--- 4. [NUEVO] WATERMARK
+-- 3b. WATERMARK (texto y/o imagen, sigue el color/gradiente del tema o uno propio)
 -- ============================================================================
--- Window:CreateWatermark(...) lo liga a la ventana: se guarda/carga con la config y se destruye con ella.
--- ClickGUI:CreateWatermark(...) crea uno independiente.
---
--- Text: texto con marcadores  {fps} {ping} {time} {date} {player} {display} {game} {players} {placeid}
---       o una funcion  function(watermark) return "texto" end
--- ColorMode: "Theme" (acento del ClickGUI) | "Gradient" | "Static" | "Rainbow"
--- Position: TopLeft TopCenter TopRight CenterLeft Center CenterRight BottomLeft BottomCenter BottomRight
-local Watermark = Window:CreateWatermark({
-	Name = "Main",
-	Text = "My Client | {display} | {fps} fps | {ping} ms | {time}",
-	Image = "⚡", -- emoji, numero de imagen, "rbxassetid://..." o ID de TU logo
-	ImageSize = 16,
-	Position = "TopLeft",
-	Offset = Vector2.new(8, 8),
-	ColorMode = "Gradient", -- adopta el color/degradado del tema del ClickGUI
-	TextSize = 14,
+-- Variables en el texto: {fps} {ping} {time} {date} {player} {display} {memory} {version} y las tuyas (Variables)
+-- Window:CreateWatermark(...) igual que ClickGUI:CreateWatermark pero su posicion/estilo se guarda en la config
+local Mark = Window:CreateWatermark({
+	Name = "Brand",
+	Text = "My Client | {fps} fps | {ping} ms | {time}",
+	Image = "⚡", -- logo: emoji, numero o rbxassetid://... (o nil para solo texto)
+	ImageSize = 20,
+	Position = "TopLeft", -- TopLeft | TopCenter | TopRight | CenterLeft | CenterRight | BottomLeft | BottomCenter | BottomRight
+	Offset = Vector2.new(12, 12),
+	-- Custom = UDim2.fromScale(0.4, 0.05),       -- posicion propia (reemplaza a Position)
 	Background = true,
-	BackgroundTransparency = 0.35,
-	CornerRadius = 6,
-	Border = false,
-	AccentLine = "Bottom", -- Bottom | Left | None
-	UpdateRate = 0.5, -- cada cuanto se refrescan {fps}, {time}...
+	BackgroundTransparency = 0.2,
+	-- Color = Color3.fromRGB(255, 255, 255),      -- color fijo; sin Color usa gradiente del tema
+	-- Gradient = { Color3.fromRGB(255, 80, 120), Color3.fromRGB(120, 80, 255) }, -- gradiente propio (false = color solido del acento)
+	GradientRotation = 0,
+	TextSize = 14,
+	UpdateRate = 0.5,
+	Variables = {
+		server = function()
+			return game.JobId ~= "" and "online" or "studio"
+		end,
+	},
 })
-
--- Otros usos:
-Watermark:SetText("My Client | {fps} fps") -- cambiar el texto
-Watermark:SetText(function(wm) -- texto dinamico con funcion
-	return string.format("My Client | %d jugadores | %s", #Players:GetPlayers(), os.date("%H:%M"))
-end)
-Watermark:SetColorMode("Theme") -- usa el acento del tema
-Watermark:SetGradient(Color3.fromRGB(255, 0, 120), Color3.fromRGB(120, 0, 255)) -- degradado propio
--- Watermark:SetColor(Color3.fromRGB(255, 255, 255))   -- color fijo (Static)
--- Watermark:SetColorMode("Rainbow")
-Watermark:SetPosition("TopLeft")
--- Watermark:SetCustomPosition(UDim2.new(0.5, 0, 0, 20)) -- posicion propia (se guarda)
--- Watermark:ResetPosition()
--- Watermark:SetOption("TextSize", 16)    -- cualquier opcion en vivo
--- Watermark:SetImage("rbxassetid://7733715400")
--- Watermark:SetEditable(true)            -- arrastralo con el mouse; (false) para terminar
--- Watermark:SetVisible(true) / :Show() / :Hide() / :Toggle() / :IsVisible()
--- Watermark:Export() / :Import(tabla)    -- (Window:ExportConfig ya lo incluye)
-
--- Un segundo watermark solo con logo, abajo a la izquierda:
-local Logo = Window:CreateWatermark({
-	Name = "Logo",
-	Text = "",
-	Image = "⚡",
-	ImageSize = 22,
-	Position = "BottomLeft",
-	ColorMode = "Rainbow",
-	Background = false,
-	AccentLine = "None",
-})
-Logo:SetVisible(false) -- oculto por defecto; enciendelo desde Settings > Watermark
+-- Mark:SetText("Nuevo {server}"); Mark:SetImage(nil); Mark:SetColor(Color3.new(1, 1, 0)); Mark:SetGradient(a, b, 45)
+-- Mark:SetPosition("TopRight"); Mark:SetBackground(false); Mark:SetTextSize(16); Mark:Toggle(); Mark:SetEditable(true) -- arrastrar
+-- Mark:SetVariable("server", "hola"); Mark:Destroy()
 
 -- ============================================================================
--- 5. [NUEVO] TARGET HUD (Target / Info / Debug)
+-- 3c. TARGET HUD generico (info de objetivo, barras, lineas, debug...)
 -- ============================================================================
--- Style "Target": avatar + nombre + barra + texto "20 / 20"  (como la captura)
--- Style "Info"  : avatar + titulo + subtitulo + lineas, sin barra
--- Style "Debug" : fuente monoespaciada con filas clave/valor
-local TargetHUD = Window:CreateTargetHUD({
+local Target = Window:CreateTargetHUD({
 	Name = "Target",
-	Style = "Target",
-	Position = "BottomCenter",
-	Offset = Vector2.new(0, 130),
-	Width = 250,
 	Title = "dodger___",
-	Max = 20,
-	Value = 20,
-	BarMode = "Health", -- Health (verde->rojo) | Accent | Gradient | Static
-	ShowBarText = true,
-	Animation = "Pop", -- Fade | Pop | None
-	AutoHide = 6, -- se oculta solo tras 6 s sin cambios
-	ImageShape = "Square", -- Square | Round
+	Subtitle = "@dodger___",
+	Image = "🎯", -- imagen/emoji/rbxthumb: o usa Target:SetPlayer(player) para su avatar automatico
+	Style = "Card", -- Card (con avatar) | Compact | Minimal
+	Position = "Center", -- Center | CenterLeft | CenterRight | TopCenter | BottomCenter | TopLeft | TopRight | BottomLeft | BottomRight
+	Width = 230,
+	Bar = { Value = 20, Max = 20, Color = "Health" }, -- barra principal: "Health" (verde->rojo), "Accent" o un Color3
+	AutoHide = 4, -- se oculta solo tras N segundos sin actualizarse (y reaparece al actualizar)
+	Debug = false,
 })
-
--- Usos:
-TargetHUD:SetPlayer(Players.LocalPlayer, true) -- nombre + avatar de un jugador (true = DisplayName)
-TargetHUD:SetTitle("dodger___")
-TargetHUD:SetSubtitle("Distancia: 12 studs") -- SetSubtitle(nil) lo quita
-TargetHUD:SetProgress(15, 20) -- (valor, maximo). Con Max = 1 muestra porcentaje
-TargetHUD:SetBarText(nil) -- texto propio de la barra, o nil para el automatico
-TargetHUD:SetFormat(function(value, max, alpha) -- formato propio del texto de la barra
-	return string.format("%d / %d HP", value, max)
-end)
--- TargetHUD:SetBarColor(Color3.fromRGB(255, 80, 80)) -- color fijo (nil = automatico)
-TargetHUD:SetLine("Arma", "Espada", Color3.fromRGB(255, 200, 80)) -- linea extra (clave, valor, color?)
-TargetHUD:SetLine("Ping", "42 ms")
-TargetHUD:RemoveLine("Ping")
-TargetHUD:SetLines({ { "Equipo", "Rojo" }, { "Nivel", 12 } }) -- reemplaza todas (en orden) | { Clave = valor } (alfabetico)
-TargetHUD:Update({ Title = "dodger___", Subtitle = "En combate", Value = 20, Max = 20 }) -- varias cosas a la vez
-TargetHUD:Show(5) -- mostrar 5 s (sin numero usa AutoHide)
--- TargetHUD:Hide() / :Toggle() / :SetVisible(bool) / :IsVisible()
--- TargetHUD:SetStyle("Info")             -- cambia el estilo en vivo
--- TargetHUD:SetOption("Width", 280)      -- cualquier opcion en vivo
--- TargetHUD:SetPosition("TopCenter") / :SetCustomPosition(UDim2) / :ResetPosition()
--- TargetHUD:SetEditable(true)            -- arrastrar; (false) al terminar
--- TargetHUD.Shown:Connect(function() end); TargetHUD.Hidden:Connect(function() end)
-
--- Seguimiento automatico de un jugador (vida + avatar + nombre), acepta Player | Humanoid | Model | nombre | UserId
--- TargetHUD:Track(Players.LocalPlayer, { UseDisplayName = true, AutoShow = true, Timeout = 8 })
--- TargetHUD:Untrack()
-
--- TargetHUD tipo Info (solo informacion, sin barra):
-local InfoHUD = Window:CreateTargetHUD({
-	Name = "Info",
-	Style = "Info",
-	Position = "CenterLeft",
-	Offset = Vector2.new(12, 0),
-	Title = "Servidor",
-	Subtitle = game.Name,
-	Image = "🌐",
-	Width = 220,
-})
-InfoHUD:SetLines({ Jugadores = #Players:GetPlayers(), PlaceId = game.PlaceId })
-
--- TargetHUD tipo Debug (se actualiza solo con Bind):
-local DebugHUD = Window:CreateTargetHUD({
-	Name = "Debug",
-	Style = "Debug",
-	Title = "DEBUG",
-	Position = "TopLeft",
-	Offset = Vector2.new(10, 60),
-	Width = 210,
-	Animation = "Fade",
-})
-local frames, elapsed, fps = 0, 0, 60
-RunService.Heartbeat:Connect(function(dt)
-	frames += 1
-	elapsed += dt
-	if elapsed >= 0.5 then
-		fps = frames / elapsed
-		frames, elapsed = 0, 0
-	end
-end)
-DebugHUD:Bind(function(hud) -- se llama cada 0.25 s
-	hud:SetLines({
-		{ "FPS", math.floor(fps + 0.5) },
-		{ "Modulos activos", #HUD.Library.Windows[1].Modules },
-		{ "Jugadores", #Players:GetPlayers() },
-	})
-end, 0.25)
-DebugHUD:Hide() -- enciendelo desde Settings > TargetHUD o con DebugHUD:Show()
--- DebugHUD:Unbind()
+Target:SetPlayer(Players.LocalPlayer) -- avatar + nombre automaticos
+Target:SetBar(14, 20) -- valor, maximo (texto "14 / 20")
+Target:SetProgress(0.7, "Cargando 70%") -- como la barra del loader: 0-1 + texto propio
+Target:SetBarColor(Color3.fromRGB(80, 200, 120)) -- "Health" | "Accent" | Color3
+local Shield = Target:AddBar("Shield", { Max = 10, Value = 6, Label = "Shield", Color = Color3.fromRGB(80, 160, 255) })
+Shield:Set(8, 10) -- Shield:SetColor / :SetLabel / :SetVisible / :Remove
+Target:SetLine("Distancia", "4.2 blk") -- lineas clave/valor (solo informacion)
+Target:SetLines({ Modo = "Single", Prioridad = "Distancia" })
+Target:SetDebug(true) -- agrega FPS / Ping / Memoria + las lineas SetDebugLine
+Target:SetDebugLine("Tick", 1234)
+-- Target:Show() / :Hide() / :Toggle() / :Flash(Color3.new(1, 0, 0)) / :SetEditable(true) (arrastrar) / :ResetPosition()
+-- Target:RemoveLine("Distancia") / :ClearLines() / :SetStyle("Compact") / :SetWidth(260) / :Destroy()
+Target:Show()
+HUD:SetEntryInfo("Watermark", "v1.1.0")
+-- HUD:RemoveEntry("Watermark")
+-- HUD:SetOption("ColorMode", "Rainbow")     -- cambia una opcion en vivo
+-- HUD:SetOptions({ TextSize = 18, Spacing = 2 })
+-- HUD:SetEditable(true)                     -- modo editor: arrastra el HUD y pulsa "Done"
+-- HUD:ResetPosition()
+-- HUD:SetVisible(false)
 
 -- ============================================================================
--- 6. CATEGORIAS Y MODULOS
+-- 4. CATEGORIAS Y MODULOS
 -- ============================================================================
+-- Group = nombre de seccion en la barra lateral del estilo Glass ("MODULES", "GENERAL"...)
 local Combat = Window:CreateCategory(
 	"Combat",
 	{ Icon = ICON, IconSize = 16, IconColor = Color3.fromRGB(255, 90, 90), Group = "Modules" }
@@ -341,14 +284,14 @@ local Visual = Window:CreateCategory("Visual", { Group = "Modules" })
 local KillAura = Combat:CreateModule({
 	Name = "KillAura",
 	Description = "Ataca jugadores cercanos",
-	Tooltip = "Click: activar | Click derecho: ajustes | Estrella: favorito",
+	Tooltip = "Click: activar | Click derecho: ajustes | Click medio: favorito",
 	Icon = ICON,
 	IconSize = 14,
 	IconActiveColor = Color3.fromRGB(255, 90, 90),
 	IconInactiveColor = Color3.fromRGB(120, 120, 130),
-	Keybind = Enum.KeyCode.R,
+	Keybind = Enum.KeyCode.R, -- tecla que activa/desactiva el modulo
 	Default = false,
-	Favorite = true, -- [NUEVO] arranca con la estrella amarilla (★)
+	Favorite = true,
 	Pinned = false,
 	Expanded = false,
 	Callback = function(enabled)
@@ -359,16 +302,14 @@ local KillAura = Combat:CreateModule({
 			Type = enabled and "Success" or "Warning",
 			Duration = 2.5,
 		})
-		-- ejemplo: mostrar el TargetHUD cuando el modulo esta activo
-		if enabled then
-			TargetHUD:Update({ Title = "dodger___", Value = 20, Max = 20 })
-			TargetHUD:Show(5)
-		end
 	end,
 })
 
 KillAura:CreateSection("Basicos")
 
+-- Toggle: Style Switch | Checkbox, colores propios, Disabled, Tooltip, Flag.
+--   Keybind = tecla que activa/desactiva el toggle. Tambien puedes cambiarla EN EL MENU con click derecho
+--   sobre el toggle (Esc cancela, Backspace/Delete borra). Lo mismo funciona en Button, ImageButton y Dropdown.
 local onlyPlayers = KillAura:CreateToggle({
 	Keybind = Enum.KeyCode.B,
 	Name = "Solo jugadores",
@@ -385,6 +326,7 @@ local onlyPlayers = KillAura:CreateToggle({
 KillAura:CreateToggle({ Name = "Casilla", Style = "Checkbox", Default = false })
 KillAura:CreateToggle({ Name = "Bloqueado", Default = true, Disabled = true, Tooltip = "Desactivado por codigo" })
 
+-- Slider: Increment, Precision, Suffix, Marks, edicion numerica (click en el numero), flechas con el mouse encima
 local range = KillAura:CreateSlider({
 	Name = "Rango",
 	Min = 1,
@@ -400,11 +342,12 @@ local range = KillAura:CreateSlider({
 	end,
 })
 
+-- RangeSlider: dos puntos, callback con (min, max)
 KillAura:CreateRangeSlider({
 	Name = "CPS",
 	Min = 1,
 	Max = 20,
-	Default = { 8, 12 },
+	Default = { 8, 12 }, -- tambien: DefaultMin / DefaultMax
 	Increment = 1,
 	MinGap = 1,
 	Flag = "cps",
@@ -413,6 +356,7 @@ KillAura:CreateRangeSlider({
 	end,
 })
 
+-- InputNumber: caja numerica con + y -
 KillAura:CreateInputNumber({
 	Name = "Delay (ms)",
 	Min = 0,
@@ -442,7 +386,7 @@ KillAura:CreateSearchableDropdown({
 	Name = "Objetivos",
 	Options = { "Players", "NPCs", "Friends", "Teammates", "Invisible", "Sleeping", "Dead" },
 	Default = { "Players" },
-	Multi = true,
+	Multi = true, -- seleccion multiple: el callback recibe una tabla
 	Flag = "targets",
 	Callback = function(list)
 		print("Objetivos:", table.concat(list, ", "))
@@ -455,10 +399,10 @@ KillAura:CreateKeybind({
 	Name = "Tecla extra",
 	Default = Enum.KeyCode.Q,
 	Flag = "extraKey",
-	Callback = function(key)
+	Callback = function(key) -- cuando CAMBIA la tecla (Esc cancela, Backspace/Delete borra)
 		print("Nueva tecla:", key)
 	end,
-	OnPressed = function()
+	OnPressed = function() -- cuando se PRESIONA la tecla
 		print("Tecla pulsada")
 	end,
 })
@@ -469,7 +413,6 @@ KillAura:CreateColorPicker({
 	Flag = "color",
 	Callback = function(color)
 		print("Color:", color)
-		Watermark:SetColor(color) -- ejemplo: el watermark usa el color elegido
 	end,
 })
 
@@ -497,7 +440,7 @@ KillAura:CreateSection("Acciones")
 KillAura:CreateLabel("Los botones ejecutan una accion al hacer click.")
 KillAura:CreateButton({
 	Name = "Notificar",
-	Keybind = Enum.KeyCode.N,
+	Keybind = Enum.KeyCode.N, -- ejecuta el boton con la tecla N (click derecho para cambiarla)
 	Callback = function()
 		Window:Notify({ Title = "Hola", Content = "Esto es una notificacion", Type = "Info", Duration = 4 })
 	end,
@@ -515,15 +458,17 @@ KillAura:CreateImageButton({
 	end,
 })
 local progress = KillAura:CreateProgressBar({ Name = "Carga", Default = 0, ShowPercent = true })
-KillAura:CreateKeybindList({ Name = "Atajos", Height = 150 })
+KillAura:CreateKeybindList({ Name = "Atajos", Height = 150 }) -- gestor central de teclas de todos los modulos
 
-onlyPlayers:SetKeybind(Enum.KeyCode.B)
+-- Teclas de componentes por codigo:
+onlyPlayers:SetKeybind(Enum.KeyCode.B) -- cambiar / SetKeybind(nil) para quitar
 print("Tecla del toggle:", onlyPlayers:GetKeybind())
 
+-- Control por codigo de cualquier componente
 task.delay(2, function()
-	range:Set(5)
-	mode:Set("Switch", true)
-	onlyPlayers:SetEnabled(false)
+	range:Set(5) -- dispara el callback
+	mode:Set("Switch", true) -- true = silencioso (sin callback)
+	onlyPlayers:SetEnabled(false) -- gris y bloqueado
 	progress:Set(0.75)
 	print(range:Get(), mode:Get(), onlyPlayers:IsEnabled())
 end)
@@ -539,65 +484,20 @@ local ESP = Visual:CreateModule({ Name = "ESP", Description = "Resalta jugadores
 ESP:CreateColorPicker({ Name = "Contorno", Default = Color3.fromRGB(167, 139, 250) })
 Visual:CreateModule({ Name = "Fullbright" })
 
--- Modulos que controlan los nuevos elementos
-local Overlays = Visual:CreateModule({ Name = "Overlays", Description = "Watermark y paneles", Toggleable = false })
-Overlays:CreateToggle({
-	Name = "Watermark",
-	Default = true,
-	Callback = function(v)
-		Watermark:SetVisible(v)
-	end,
-})
-Overlays:CreateToggle({
-	Name = "Logo",
-	Default = false,
-	Callback = function(v)
-		Logo:SetVisible(v)
-	end,
-})
-Overlays:CreateToggle({
-	Name = "Debug",
-	Default = false,
-	Callback = function(v)
-		DebugHUD:SetVisible(v)
-	end,
-})
-Overlays:CreateToggle({
-	Name = "Info del servidor",
-	Default = false,
-	Callback = function(v)
-		InfoHUD:SetVisible(v)
-	end,
-})
-Overlays:CreateToggle({
-	Name = "Editar posiciones",
-	Tooltip = "Arrastra watermark y paneles con el mouse",
-	Callback = function(v)
-		Watermark:SetEditable(v)
-		TargetHUD:SetEditable(v)
-		DebugHUD:SetEditable(v)
-		InfoHUD:SetEditable(v)
-	end,
-})
-
--- Modulo sin interruptor
+-- Modulo que solo tiene ajustes (sin interruptor)
 local Info = Visual:CreateModule({ Name = "Opciones", Toggleable = false, ShowKeybind = false, ShowInHUD = false })
 Info:CreateLabel("Modulo sin interruptor: el click solo despliega.")
 
 -- Control de modulos por codigo
 Sprint:SetEnabled(true)
-Speed:SetPinned(true) -- fijar arriba (Shift + estrella tambien)
-KillAura:SetFavorite(true) -- [NUEVO] equivale a pulsar la estrella
+KillAura:SetFavorite(true) -- tambien se marca con la ESTRELLA a la derecha de cada modulo (clic = amarilla)
+Speed:SetPinned(true)
 Speed:SetVisible(true)
 KillAura:SetInfo("Single")
-KillAura:SetDescription("Ataca jugadores cercanos (v2)") -- [NUEVO]
-print("Favoritos:", #Window:GetFavorites(), "Fijados:", #Window:GetPinned(), "KillAura favorito:", KillAura:IsFavorite())
 -- KillAura:Expand() / :Collapse() / :Toggle() / :Destroy()
--- Window:ToggleModule("Sprint")        -- [NUEVO] alternar por nombre
--- Window:ToggleModule("Sprint", true)  -- o fijar el estado
 
 -- ============================================================================
--- 7. COMPONENTE PROPIO
+-- 5. COMPONENTE PROPIO
 -- ============================================================================
 local Base = ClickGUI.Base
 local Create = ClickGUI.Create
@@ -637,93 +537,84 @@ function Counter:Set(value, silent)
 		self:_emit(value)
 	end
 end
-ClickGUI:RegisterComponent("Counter", Counter.new)
+ClickGUI:RegisterComponent("Counter", Counter.new) -- agrega Module:CreateCounter
 KillAura:CreateCounter({ Name = "Contador", Callback = print })
 
 -- ============================================================================
--- 8. BUSQUEDA, FAVORITOS, TOOLTIPS, TAMANO, TEMAS
+-- 6. BUSQUEDA, FAVORITOS, TOOLTIPS
 -- ============================================================================
 Window:Search("movement", { SearchNames = true, SearchDescriptions = true, SearchCategories = true })
-Window:Search("")
-Window:SetFavoritesOnly(false) -- true = solo modulos con estrella
+Window:Search("") -- limpia (tambien: Window:ClearSearch(), Window:FocusSearch())
+print("Favoritos:", #Window:GetFavorites(), "Fijados:", #Window:GetPinned())
+Window:SetFavoritesOnly(false)
 Window:SetTooltipsEnabled(true)
-Window:SetTitle("My Client") -- [NUEVO] cambiar el titulo en vivo
 
+-- ============================================================================
+-- 7. TAMANO, POSICION Y ESCALA
+-- ============================================================================
 Window:SetMinSize(UDim2.fromOffset(480, 320))
 Window:SetMaxSize(UDim2.fromOffset(1000, 750))
-Window:SetPanelWidth(200)
-Window:SetScale(nil) -- nil = automatica
+Window:SetSize(UDim2.fromOffset(720, 480)) -- Sidebar: tamano de ventana | Panels: ancho de columnas
+Window:SetResizable(true) -- Sidebar: esquina/bordes | Panels: borde derecho de cada columna
+Window:SetPanelWidth(200) -- Panels
+Window:SetScale(nil) -- nil = automatica; Window:SetScale(1.2) = fija
 Window:ResetLayout()
 Window:BringToFront()
 
-Window:SetTheme(THEME)
+-- ============================================================================
+-- 8. TEMAS EN VIVO
+-- ============================================================================
+Window:SetTheme("Neon") -- por nombre
 Window:SetAccent(Color3.fromRGB(255, 0, 120))
-Window:SetThemeValue("CornerRadius", 12)
+Window:SetThemeValue("CornerRadius", 12) -- cualquier campo del tema
+Window:SetThemeValue("BorderThickness", 2)
+Window:SetThemeValue("Gradients", true)
+Window:SetThemeValue("ShadowPreset", "Medium")
 Window:SetThemeValue("Transparency", 0.1)
-Window:SetTheme({ Accent = Color3.fromRGB(120, 200, 255) })
-local themeData = ClickGUI:ExportTheme()
+Window:SetTheme({ Accent = Color3.fromRGB(120, 200, 255) }) -- tabla parcial
+local themeData = ClickGUI:ExportTheme() -- tabla serializable (JSON)
 ClickGUI:ImportTheme(themeData, "Guardado")
+-- Barra de colores (Flat): cambiarla en vivo
 Window:SetPalette({ "Violet", "Mocha", "Midnight", "Ink", Color3.fromRGB(255, 80, 120) })
-Window:SetTheme(THEME)
+Window:SetTheme(THEME) -- el estilo se mantiene al cambiar de tema
 
 -- ============================================================================
--- 9. CATEGORIA DE AJUSTES LISTA
+-- 9. CATEGORIA DE AJUSTES LISTA (tema, apariencia, animaciones, HUD, config)
 -- ============================================================================
--- [NUEVO] Secciones: Interface, Appearance, Animations, Notifications, HUD, Watermark, TargetHUD, Config, Security
---   Config  : perfiles (guardar/cargar/borrar/lista), Auto Save + Save Interval (slider), Auto Load, layout, JSON
---   Security: toggles Encrypt (CoreGui) y Encrypt Names
 Window:CreateSettingsCategory("Settings", {
 	HUD = HUD,
-	Watermark = Watermark, -- cual watermark controla la seccion
-	TargetHUD = TargetHUD, -- cual TargetHUD controla la seccion
 	Category = { Group = "General" },
-	Sections = {
-		"Interface",
-		"Appearance",
-		"Animations",
-		"Notifications",
-		"HUD",
-		"Watermark",
-		"TargetHUD",
-		"Config",
-		"Security",
-	},
+	Sections = { "Interface", "Appearance", "Animations", "Notifications", "HUD", "Config" },
 })
 
 -- ============================================================================
--- 10. [NUEVO] CONFIGURACION: perfiles, auto save, auto load
+-- 10. CONFIGURACION: exportar, importar, guardar, cargar, resetear
 -- ============================================================================
--- Que se guarda: valores de TODOS los componentes, estado y teclas de modulos, favoritos/fijados,
--- posiciones/tamanos, tema, escala, animaciones, notificaciones (estilo, posicion, ancho...),
--- ajustes de la ventana, HUD, watermarks y TargetHUDs. Persist = false excluye un componente.
-Window:SetAutoSave(true, 45) -- (activado, segundos). Tambien: Window:GetAutoSave() -> activado, segundos
-Window:SetAutoLoad(true) -- Window:GetAutoLoad()
-Window:SetProfile("default") -- perfil actual (Window:GetProfile())
-
--- Guardar / cargar perfiles a mano (devuelven true si funcionaron):
--- Window:SaveConfig()            -- guarda el perfil actual
--- Window:SaveConfig("legit")     -- guarda en el perfil "legit"
--- Window:LoadConfig("legit")     -- carga ese perfil
--- Window:DeleteConfig("legit")   -- lo borra
--- Window:LoadAuto()              -- lo mismo que hace AutoLoad (si lo llamas tu, hazlo tras crear todo)
-print("Perfiles guardados:", table.concat(Window:ListConfigs(), ", "))
-
--- JSON (para compartir):
-local json = Window:ExportConfig()
-Window:ImportConfig(json) -- tambien acepta una tabla y configs de versiones anteriores
+-- Que se guarda: TODOS los valores de componentes (toggles, sliders, dropdowns, colores, textboxes...),
+-- el estado de cada modulo, las TECLAS de modulos y de componentes (Keybind), favoritos/fijados,
+-- posiciones y tamanos de paneles/ventana, tema, escala, animaciones, HUD...
+-- No necesitas Flag para que se guarde; Flag solo sirve para leerlo por nombre (Window:GetFlag).
+-- Un componente puede excluirse con Persist = false.
+local json = Window:ExportConfig() -- JSON con valores, modulos, favoritos, layout, tema, animaciones, HUD...
+Window:ImportConfig(json) -- tambien acepta una tabla y configs de la version anterior
 print("Valor de flag:", Window:GetFlag("range"))
 Window:SetFlag("range", 3, true)
-Window:SaveLayout()
+-- Perfiles de configuracion (varias configs con nombre, ademas de la "Default"):
+Window:SaveProfile("Legit") -- guarda la config actual con ese nombre
+Window:SaveProfile("Rage")
+print("Perfiles:", table.concat(Window:GetProfiles(), ", "), "| actual:", Window:GetProfile())
+Window:LoadProfile("Legit")
+Window:SetStartupProfile("Legit") -- con AutoLoadConfig se carga solo al iniciar
+Window:DeleteProfile("Rage")
+-- Config automatica en vivo: Window:SetAutoSave(true, 120); Window:SetAutoLoad(true); Window:SetAutoSaveLayout(true)
+-- Window:SetTitle("Otro titulo"); Window:SetSubtitle("v2")
+-- Se guardan tambien: tema de notificaciones, tecla del menu, animacion de apertura, contadores, busqueda y
+-- las posiciones de HUD / Watermark / TargetHUD.
+Window:SaveLayout() -- posiciones, tamanos, favoritos en el storage
 Window:LoadLayout()
--- Window:ResetConfig() -- vuelve todo a los valores por defecto (incluye notificaciones)
-
--- Eventos de la config
-Window.ConfigSaved:Connect(function(profile)
-	print("Perfil guardado:", profile)
-end)
-Window.ConfigImported:Connect(function()
-	print("Config cargada")
-end)
+Window:SaveConfig() -- todo en el storage
+Window:LoadConfig()
+-- Window:ResetConfig()                      -- vuelve todo a los valores por defecto
 
 -- Terminar la pantalla de carga (cuando tu codigo termino de preparar todo):
 Loader:CompleteTask("Cargando modulos")
@@ -742,7 +633,7 @@ Window.ModuleToggled:Connect(function(module, enabled)
 	print(module.Name, enabled)
 end)
 Window.FavoritesChanged:Connect(function(module)
-	print("Favorito cambiado:", module.Name, module:IsFavorite())
+	print("Favorito cambiado:", module.Name)
 end)
 KillAura.Changed:Connect(function(enabled)
 	print("Evento del modulo:", enabled)
@@ -761,10 +652,10 @@ ClickGUI:Notify({
 	Duration = 6,
 })
 -- Opciones por notificacion: Title, Content, Type (Info|Success|Warning|Error), Duration (0 = fija),
--- Style (Modern|Minimal|Banner), Icon, Closable, Progress, OnClick
+-- Style (Modern|Minimal|Banner), Icon (emoji/numero/rbxassetid), Closable, Progress, OnClick
 local handle = ClickGUI:Notify({
 	Title = "Con accion",
-	Content = "Haz click para ejecutar algo. Las notificaciones largas ya no se solapan: la altura se calcula segun el texto.",
+	Content = "Haz click para ejecutar algo.",
 	Type = "Success",
 	Style = "Banner",
 	Icon = "🎉",
@@ -774,21 +665,18 @@ local handle = ClickGUI:Notify({
 	end,
 })
 -- handle:Dismiss()  |  ClickGUI:ClearNotifications()
--- ClickGUI:SetNotificationConfig({ Position = "TopCenter", Scale = 1.1 }) -- cambia en vivo y se guarda
--- ClickGUI:ResetNotificationConfig()
+-- Pasar el mouse por encima pausa el temporizador.
 
 -- ============================================================================
--- 13. SOMBRAS (UIShadow) por separado
+-- 13. SOMBRAS (UIShadow) por separado, util para tus propios frames
 -- ============================================================================
 -- local shadow = ClickGUI.UIShadow.new({ Parent = miFrame, Preset = "Soft", CornerRadius = 8 })
 -- shadow:SetOpacity(0.5); shadow:SetColor(Color3.new(0, 0, 0)); shadow:SetOffset(Vector2.new(0, 4))
+-- shadow:SetSpread(4); shadow:SetLayers(8); shadow:SetEnabled(true); shadow:Destroy()
 
 -- ============================================================================
 -- 14. LIMPIEZA
 -- ============================================================================
--- Window:Destroy()        -- solo esta ventana (y los Watermark/TargetHUD creados con Window:Create...)
--- Watermark:Destroy()
--- TargetHUD:Destroy()
+-- Window:Destroy()      -- solo esta ventana
 -- HUD:Destroy()
--- ClickGUI:Destroy()      -- todo (ventanas, HUDs, watermarks, TargetHUDs, loaders, notificaciones)
--- ClickGUI:Unload()       -- alias de Destroy
+-- ClickGUI:Destroy()    -- todo (ventanas, HUDs, notificaciones)

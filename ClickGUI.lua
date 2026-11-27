@@ -51,6 +51,7 @@ local __n_Components_Base = __newNode("Base", __n_Components)
 local __n_Components_Button = __newNode("Button", __n_Components)
 local __n_Components_ColorPicker = __newNode("ColorPicker", __n_Components)
 local __n_Components_Dropdown = __newNode("Dropdown", __n_Components)
+local __n_Components_Graphic = __newNode("Graphic", __n_Components)
 local __n_Components_ImageButton = __newNode("ImageButton", __n_Components)
 local __n_Components_InputNumber = __newNode("InputNumber", __n_Components)
 local __n_Components_Keybind = __newNode("Keybind", __n_Components)
@@ -963,6 +964,1010 @@ end
 return self.Value
 end
 return Dropdown
+end
+__functions[__n_Components_Graphic] = function(script, require)
+local UserInputService = game:GetService("UserInputService")
+local Base = require(script.Parent.Base)
+local ColorPicker = require(script.Parent.ColorPicker)
+local Create = require(script.Parent.Parent.Utilities.Create)
+local AnimationManager = require(script.Parent.Parent.Core.AnimationManager)
+local Graphic = setmetatable({}, { __index = Base })
+Graphic.__index = Graphic
+local HEADER_HEIGHT = 24
+local BODY_HEIGHT = 150
+local BAR_Y = 6
+local BAR_HEIGHT = 84
+local STRIP_Y = BAR_Y + BAR_HEIGHT + 2
+local STRIP_HEIGHT = 24
+local CURVE_Y = 6
+local CURVE_HEIGHT = 112
+local INFO_Y = 124
+local INFO_HEIGHT = 22
+local PICKER_ROW_HEIGHT = 24
+local PLOT_INSET = 8
+local MAX_KEYPOINTS = 20
+local GAP = 0.004
+local MERGE = GAP / 2
+local COLUMNS = 96
+local MINI_COLUMNS = 12
+local WHITE = Color3.new(1, 1, 1)
+local function round(value)
+return math.floor(value * 10000 + 0.5) / 10000
+end
+local function normalize(points, maxPoints)
+table.sort(points, function(a, b)
+return a.T < b.T
+end)
+local out = {}
+for _, point in points do
+point.T = math.clamp(point.T, 0, 1)
+local last = out[#out]
+if not last or point.T - last.T >= MERGE then
+table.insert(out, point)
+end
+end
+if #out == 0 then
+return out
+end
+local head = out[1]
+if head.T < MERGE then
+head.T = 0
+else
+table.insert(out, 1, { T = 0, C = head.C, V = head.V })
+end
+local tail = out[#out]
+if 1 - tail.T < MERGE then
+tail.T = 1
+else
+table.insert(out, { T = 1, C = tail.C, V = tail.V })
+end
+while #out > maxPoints do
+table.remove(out, (#out - 1))
+end
+return out
+end
+local function sampleColor(points, t)
+local count = #points
+if t <= points[1].T then
+return points[1].C
+end
+if t >= points[count].T then
+return points[count].C
+end
+for index = 1, count - 1 do
+local a, b = points[index], points[index + 1]
+if t <= b.T then
+return a.C:Lerp(b.C, (t - a.T) / (b.T - a.T))
+end
+end
+return points[count].C
+end
+local function computeTangents(points)
+local count = #points
+local tangents = table.create(count, 0)
+if count < 2 then
+return tangents
+end
+local spans, deltas = {}, {}
+for index = 1, count - 1 do
+local span = points[index + 1].T - points[index].T
+spans[index] = span
+deltas[index] = (points[index + 1].V - points[index].V) / span
+end
+tangents[1] = deltas[1]
+tangents[count] = deltas[count - 1]
+for index = 2, count - 1 do
+local before, after = deltas[index - 1], deltas[index]
+if before * after <= 0 then
+tangents[index] = 0
+else
+local h0, h1 = spans[index - 1], spans[index]
+tangents[index] = 3 * (h0 + h1) / ((2 * h1 + h0) / before + (h1 + 2 * h0) / after)
+end
+end
+return tangents
+end
+local function evaluate(points, tangents, t, smooth)
+local count = #points
+if t <= points[1].T then
+return points[1].V
+end
+if t >= points[count].T then
+return points[count].V
+end
+local index = 1
+while index < count - 1 and t > points[index + 1].T do
+index += 1
+end
+local a, b = points[index], points[index + 1]
+local span = b.T - a.T
+local u = (t - a.T) / span
+if not smooth then
+return a.V + (b.V - a.V) * u
+end
+local u2 = u * u
+local u3 = u2 * u
+local result = (2 * u3 - 3 * u2 + 1) * a.V
++ (u3 - 2 * u2 + u) * span * tangents[index]
++ (-2 * u3 + 3 * u2) * b.V
++ (u3 - u2) * span * tangents[index + 1]
+return math.clamp(result, 0, 1)
+end
+local function createGradientHandle(parent)
+local root = Create("Frame", {
+Name = "Marker",
+AnchorPoint = Vector2.new(0.5, 0),
+Size = UDim2.fromOffset(12, 20),
+BackgroundTransparency = 1,
+Parent = parent,
+})
+Create("Frame", {
+Name = "Stem",
+AnchorPoint = Vector2.new(0.5, 0),
+Position = UDim2.fromScale(0.5, 0),
+Size = UDim2.fromOffset(2, 6),
+BackgroundColor3 = WHITE,
+Parent = root,
+})
+local body = Create("Frame", {
+Name = "Body",
+Position = UDim2.fromOffset(0, 5),
+Size = UDim2.fromOffset(12, 15),
+BackgroundColor3 = WHITE,
+Parent = root,
+})
+Create.corner(body, 3)
+local stroke = Create.stroke(body, WHITE, 1)
+return { Root = root, Body = body, Stroke = stroke }
+end
+local function createCurveHandle(parent)
+local root = Create("Frame", {
+Name = "Point",
+AnchorPoint = Vector2.new(0.5, 0.5),
+Size = UDim2.fromOffset(10, 10),
+BackgroundColor3 = WHITE,
+ZIndex = 4,
+Parent = parent,
+})
+Create.pill(root)
+local stroke = Create.stroke(root, WHITE, 2)
+return { Root = root, Stroke = stroke }
+end
+function Graphic.new(ctx, parent, options, _module)
+local self = setmetatable(Base.new(ctx, parent, options.Name, HEADER_HEIGHT), Graphic)
+local theme = self._theme
+local requested = type(options.Mode) == "string" and string.lower(options.Mode) or "gradient"
+if requested ~= "gradient" and requested ~= "curve" then
+warn(`[ClickGUI] Graphic "{options.Name}" has an unknown Mode "{tostring(options.Mode)}", using Gradient`)
+requested = "gradient"
+end
+self._mode = requested == "curve" and "Curve" or "Gradient"
+self._isCurve = self._mode == "Curve"
+self._callback = options.Callback
+self._smooth = options.Smooth ~= false
+self._maxPoints =
+math.clamp(math.floor(tonumber(options.MaxPoints) or (self._isCurve and 8 or MAX_KEYPOINTS)), 2, MAX_KEYPOINTS)
+self._open = false
+self._animating = false
+self._animToken = 0
+self._drag = nil
+self._hovered = false
+self._tangents = {}
+self._columns = {}
+self._mini = {}
+self._grid = {}
+self._handles = {}
+self._buttons = {}
+self.Frame.ClipsDescendants = true
+local points
+if options.Default ~= nil then
+points = self:_prepare(self:_parse(options.Default))
+if not points then
+warn(`[ClickGUI] Graphic "{options.Name}" received an invalid Default for mode {self._mode}`)
+end
+end
+if not points then
+if self._isCurve then
+points = { { T = 0, V = 0 }, { T = 1, V = 1 } }
+else
+points = { { T = 0, C = theme:Get("Accent") }, { T = 1, C = theme:Get("AccentDark") } }
+end
+end
+self._points = points
+self._selected = points[1]
+local header =
+Create("TextButton", { Name = "Header", Size = UDim2.new(1, 0, 0, HEADER_HEIGHT), Parent = self.Frame })
+self:_label({
+Name = "Label",
+Position = UDim2.fromOffset(2, 0),
+Size = UDim2.new(1, -44, 1, 0),
+Text = options.Name,
+TextXAlignment = Enum.TextXAlignment.Left,
+TextTruncate = Enum.TextTruncate.AtEnd,
+Parent = header,
+})
+self._swatch = Create("Frame", {
+Name = "Preview",
+AnchorPoint = Vector2.new(1, 0.5),
+Position = UDim2.new(1, -2, 0.5, 0),
+Size = UDim2.fromOffset(30, 14),
+BackgroundColor3 = self._isCurve and theme:Get("Element") or WHITE,
+Parent = header,
+})
+Create.corner(self._swatch, 4)
+local swatchStroke = Create.stroke(self._swatch, theme:Get("Stroke"), 1)
+theme:Bind(swatchStroke, "Color", "Stroke")
+if self._isCurve then
+theme:Bind(self._swatch, "BackgroundColor3", "Element")
+local mini = Create("Frame", {
+Name = "Mini",
+Position = UDim2.fromOffset(3, 2),
+Size = UDim2.new(1, -6, 1, -4),
+BackgroundTransparency = 1,
+ClipsDescendants = true,
+Parent = self._swatch,
+})
+for index = 1, MINI_COLUMNS do
+self._mini[index] = Create("Frame", {
+Name = "Bar",
+AnchorPoint = Vector2.new(0, 1),
+Position = UDim2.new((index - 1) / MINI_COLUMNS, 0, 1, 0),
+Size = UDim2.new(1 / MINI_COLUMNS, 0, 0, 1),
+BackgroundColor3 = theme:Get("Accent"),
+Parent = mini,
+})
+end
+else
+self._swatchGradient = Create("UIGradient", { Parent = self._swatch })
+end
+self._content = Create("Frame", {
+Name = "Content",
+Position = UDim2.fromOffset(0, HEADER_HEIGHT),
+Size = UDim2.new(1, 0, 0, 0),
+AutomaticSize = Enum.AutomaticSize.Y,
+BackgroundTransparency = 1,
+Parent = self.Frame,
+})
+Create.list(self._content, 0)
+self._body = Create("Frame", {
+Name = "Body",
+Size = UDim2.new(1, 0, 0, BODY_HEIGHT),
+BackgroundTransparency = 1,
+LayoutOrder = 1,
+Parent = self._content,
+})
+if self._isCurve then
+self:_buildCurve()
+else
+self:_buildGradient()
+end
+self:_buildInfo()
+if not self._isCurve then
+self._picker = ColorPicker.new(ctx, self._content, {
+Name = "Point Color",
+Default = self._selected.C,
+Callback = function(color)
+self:_onPickerChanged(color)
+end,
+}, nil)
+self._picker.Frame.LayoutOrder = 2
+self._maid:Give(function()
+self._picker:Destroy()
+end)
+local pickerHeader = self._picker.Frame:FindFirstChild("Header")
+self._pickerLabel = pickerHeader and pickerHeader:FindFirstChild("Label")
+end
+self._maid:Give(header.MouseButton1Click:Connect(function()
+self:SetOpen(not self._open)
+end))
+self._maid:Give(self._hit.InputBegan:Connect(function(input)
+self:_begin(input)
+end))
+self._maid:Give(self._hit.MouseEnter:Connect(function()
+self._hovered = true
+end))
+self._maid:Give(self._hit.MouseLeave:Connect(function()
+self._hovered = false
+end))
+self._maid:Give(UserInputService.InputChanged:Connect(function(input)
+local drag = self._drag
+if not drag then
+return
+end
+if
+input.UserInputType == Enum.UserInputType.MouseMovement
+or (input.UserInputType == Enum.UserInputType.Touch and input == drag.Input)
+then
+self:_dragTo(input.Position)
+end
+end))
+self._maid:Give(UserInputService.InputEnded:Connect(function(input)
+local drag = self._drag
+if not drag then
+return
+end
+local sameTouch = input.UserInputType == Enum.UserInputType.Touch and input == drag.Input
+local sameMouse = input.UserInputType == Enum.UserInputType.MouseButton1
+and drag.Input.UserInputType == Enum.UserInputType.MouseButton1
+if sameTouch or sameMouse then
+self._drag = nil
+self:_lockScroll(false)
+if not drag.Moved and self._picker and self._open then
+self._picker:SetOpen(true)
+end
+end
+end))
+self._maid:Give(UserInputService.InputBegan:Connect(function(input, processed)
+if processed or not self._hovered or self._enabledState == false then
+return
+end
+if input.KeyCode == Enum.KeyCode.Delete or input.KeyCode == Enum.KeyCode.Backspace then
+self:_remove(self._selected)
+end
+end))
+self._maid:Give(self._content:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+self:_updateHeight(self._animating)
+end))
+self:_onTheme(function()
+self:_applyTheme()
+self:_renderButtons(true)
+self:_render(true)
+end)
+self:_applyTheme()
+self:_rebuild()
+self:_render()
+if options.Expanded then
+task.defer(function()
+if not self._destroyed then
+self:SetOpen(true)
+end
+end)
+end
+return self
+end
+function Graphic:_buildGradient()
+local theme = self._theme
+self._bar = Create("Frame", {
+Name = "Bar",
+Position = UDim2.fromOffset(PLOT_INSET, BAR_Y),
+Size = UDim2.new(1, -PLOT_INSET * 2, 0, BAR_HEIGHT),
+BackgroundColor3 = WHITE,
+Parent = self._body,
+})
+Create.corner(self._bar, 5)
+local stroke = Create.stroke(self._bar, theme:Get("Stroke"), 1)
+theme:Bind(stroke, "Color", "Stroke")
+self._barGradient = Create("UIGradient", { Parent = self._bar })
+self._strip = Create("Frame", {
+Name = "Markers",
+Position = UDim2.fromOffset(PLOT_INSET, STRIP_Y),
+Size = UDim2.new(1, -PLOT_INSET * 2, 0, STRIP_HEIGHT),
+BackgroundTransparency = 1,
+Parent = self._body,
+})
+self._area = self._bar
+self._hit = Create("TextButton", {
+Name = "Hit",
+Position = UDim2.fromOffset(0, BAR_Y),
+Size = UDim2.new(1, 0, 0, BAR_HEIGHT + 2 + STRIP_HEIGHT),
+ZIndex = 6,
+Parent = self._body,
+})
+end
+function Graphic:_buildCurve()
+local theme = self._theme
+self._panel = Create("Frame", {
+Name = "Panel",
+Position = UDim2.fromOffset(2, CURVE_Y),
+Size = UDim2.new(1, -4, 0, CURVE_HEIGHT),
+BackgroundColor3 = theme:Get("Element"),
+ClipsDescendants = true,
+Parent = self._body,
+})
+Create.corner(self._panel, 5)
+theme:Bind(self._panel, "BackgroundColor3", "Element")
+self._plot = Create("Frame", {
+Name = "Plot",
+Position = UDim2.fromOffset(PLOT_INSET, PLOT_INSET),
+Size = UDim2.new(1, -PLOT_INSET * 2, 1, -PLOT_INSET * 2),
+BackgroundTransparency = 1,
+Parent = self._panel,
+})
+for step = 0, 4 do
+local alpha = step / 4
+local horizontal = Create("Frame", {
+Name = "GridH",
+AnchorPoint = Vector2.new(0, alpha),
+Position = UDim2.fromScale(0, alpha),
+Size = UDim2.new(1, 0, 0, 1),
+BackgroundColor3 = theme:Get("Stroke"),
+BackgroundTransparency = 0.45,
+Parent = self._plot,
+})
+theme:Bind(horizontal, "BackgroundColor3", "Stroke")
+local vertical = Create("Frame", {
+Name = "GridV",
+AnchorPoint = Vector2.new(alpha, 0),
+Position = UDim2.fromScale(alpha, 0),
+Size = UDim2.new(0, 1, 1, 0),
+BackgroundColor3 = theme:Get("Stroke"),
+BackgroundTransparency = 0.45,
+Parent = self._plot,
+})
+theme:Bind(vertical, "BackgroundColor3", "Stroke")
+end
+for index = 1, COLUMNS do
+local fill = Create("Frame", {
+Name = "Fill",
+AnchorPoint = Vector2.new(0, 1),
+Position = UDim2.new((index - 1) / COLUMNS, 0, 1, 0),
+Size = UDim2.new(1 / COLUMNS, 1, 0, 0),
+BackgroundColor3 = theme:Get("Accent"),
+BackgroundTransparency = 0.82,
+ZIndex = 1,
+Parent = self._plot,
+})
+local cap = Create("Frame", {
+Name = "Line",
+Position = UDim2.new((index - 1) / COLUMNS, 0, 1, -1),
+Size = UDim2.new(1 / COLUMNS, 1, 0, 2),
+BackgroundColor3 = theme:Get("Accent"),
+ZIndex = 2,
+Parent = self._plot,
+})
+self._columns[index] = { Fill = fill, Cap = cap }
+end
+self._area = self._plot
+self._hit = Create("TextButton", {
+Name = "Hit",
+Size = UDim2.fromScale(1, 1),
+ZIndex = 6,
+Parent = self._panel,
+})
+end
+function Graphic:_numberBox(parent, order, prefix, onCommit)
+local theme = self._theme
+local cell = Create("Frame", {
+Name = prefix,
+Size = UDim2.new(1 / 3, -3, 1, 0),
+BackgroundColor3 = theme:Get("Element"),
+LayoutOrder = order,
+Parent = parent,
+})
+Create.corner(cell, 5)
+theme:Bind(cell, "BackgroundColor3", "Element")
+local stroke = Create.stroke(cell, theme:Get("Stroke"), 1, 1)
+local tag = Create("TextLabel", {
+Name = "Prefix",
+Position = UDim2.fromOffset(7, 0),
+Size = UDim2.new(0, 24, 1, 0),
+Text = prefix,
+TextSize = 10,
+TextXAlignment = Enum.TextXAlignment.Left,
+TextColor3 = theme:Get("TextDim"),
+Font = theme:Get("Font"),
+Parent = cell,
+})
+theme:Bind(tag, "TextColor3", "TextDim")
+theme:Bind(tag, "Font", "Font")
+local box = Create("TextBox", {
+Name = "Box",
+Position = UDim2.fromOffset(30, 0),
+Size = UDim2.new(1, -36, 1, 0),
+TextXAlignment = Enum.TextXAlignment.Right,
+TextColor3 = theme:Get("Text"),
+Font = theme:Get("Font"),
+ClipsDescendants = true,
+Active = true,
+Parent = cell,
+})
+theme:Bind(box, "TextColor3", "Text")
+theme:Bind(box, "Font", "Font")
+self._maid:Give(box.Focused:Connect(function()
+AnimationManager.Play(stroke, "Fast", { Color = theme:Get("Accent"), Transparency = 0 })
+end))
+self._maid:Give(box.FocusLost:Connect(function()
+AnimationManager.Play(stroke, "Fast", { Transparency = 1 })
+local number = tonumber(string.match(box.Text, "%-?%d+%.?%d*"))
+if number then
+onCommit(number)
+end
+self:_render(true)
+end))
+return box
+end
+function Graphic:_actionButton(parent, order, text, callback)
+local theme = self._theme
+local button = Create("TextButton", {
+Name = text,
+Size = UDim2.new(1 / 3, -3, 1, 0),
+BackgroundTransparency = 0,
+BackgroundColor3 = theme:Get("Element"),
+Text = text,
+TextColor3 = theme:Get("Text"),
+Font = theme:Get("Font"),
+LayoutOrder = order,
+Parent = parent,
+})
+Create.corner(button, 5)
+theme:Bind(button, "TextColor3", "Text")
+theme:Bind(button, "Font", "Font")
+local entry = { Button = button, Hovered = false }
+table.insert(self._buttons, entry)
+self._maid:Give(button.MouseEnter:Connect(function()
+entry.Hovered = true
+self:_renderButtons(true)
+end))
+self._maid:Give(button.MouseLeave:Connect(function()
+entry.Hovered = false
+self:_renderButtons(true)
+end))
+self._maid:Give(button.MouseButton1Click:Connect(callback))
+return button
+end
+function Graphic:_buildInfo()
+local row = Create("Frame", {
+Name = "Info",
+Position = UDim2.fromOffset(2, INFO_Y),
+Size = UDim2.new(1, -4, 0, INFO_HEIGHT),
+BackgroundTransparency = 1,
+Parent = self._body,
+})
+Create.list(row, 4, true)
+self._timeBox = self:_numberBox(row, 1, "Pos", function(number)
+self:_move(self._selected, number / 100, nil)
+end)
+if self._isCurve then
+self._valueBox = self:_numberBox(row, 2, "Val", function(number)
+self:_move(self._selected, self._selected.T, number)
+end)
+self._deleteButton = self:_actionButton(row, 3, "Delete", function()
+self:_remove(self._selected)
+end)
+else
+self._deleteButton = self:_actionButton(row, 2, "Delete", function()
+self:_remove(self._selected)
+end)
+self:_actionButton(row, 3, "Reverse", function()
+self:Reverse()
+end)
+end
+end
+function Graphic:_parse(value)
+if self._mode == "Gradient" then
+if typeof(value) == "ColorSequence" then
+local points = {}
+for _, keypoint in value.Keypoints do
+table.insert(points, { T = keypoint.Time, C = keypoint.Value })
+end
+return points
+elseif typeof(value) == "Color3" then
+return { { T = 0, C = value }, { T = 1, C = value } }
+end
+else
+if typeof(value) == "NumberSequence" then
+local points = {}
+for _, keypoint in value.Keypoints do
+table.insert(points, { T = keypoint.Time, V = math.clamp(keypoint.Value, 0, 1) })
+end
+return points
+elseif type(value) == "number" then
+local flat = math.clamp(value, 0, 1)
+return { { T = 0, V = flat }, { T = 1, V = flat } }
+end
+end
+if type(value) ~= "table" then
+return nil
+end
+if value.Mode ~= nil and value.Mode ~= self._mode then
+return nil
+end
+local list = value.Points or value
+if type(list) ~= "table" then
+return nil
+end
+local points = {}
+for _, entry in list do
+if type(entry) == "table" and type(entry[1]) == "number" then
+if self._mode == "Gradient" then
+if type(entry[2]) == "number" and type(entry[3]) == "number" and type(entry[4]) == "number" then
+table.insert(points, {
+T = entry[1],
+C = Color3.new(math.clamp(entry[2], 0, 1), math.clamp(entry[3], 0, 1), math.clamp(entry[4], 0, 1)),
+})
+end
+elseif type(entry[2]) == "number" then
+table.insert(points, { T = entry[1], V = math.clamp(entry[2], 0, 1) })
+end
+end
+end
+return points
+end
+function Graphic:_prepare(points)
+if type(points) ~= "table" or #points == 0 then
+return nil
+end
+local limit = math.max(self._maxPoints, math.min(#points, MAX_KEYPOINTS))
+self._maxPoints = limit
+local result = normalize(points, limit)
+if #result < 2 then
+return nil
+end
+return result
+end
+function Graphic:_valueAt(t)
+return evaluate(self._points, self._tangents, t, self._smooth)
+end
+function Graphic:_colorSequence()
+local keypoints = {}
+for index, point in self._points do
+keypoints[index] = ColorSequenceKeypoint.new(point.T, point.C)
+end
+return ColorSequence.new(keypoints)
+end
+function Graphic:_numberSequence()
+local points = self._points
+local samples = {}
+for _, point in points do
+table.insert(samples, { T = point.T, V = point.V })
+end
+local budget = MAX_KEYPOINTS - #points
+if self._smooth and #points >= 3 and budget > 0 then
+local segments = #points - 1
+local accumulated, used = 0, 0
+for index = 1, segments do
+local a, b = points[index], points[index + 1]
+accumulated += budget * (b.T - a.T)
+local count = math.floor(accumulated + 0.5) - used
+used += count
+for step = 1, count do
+local t = a.T + (b.T - a.T) * step / (count + 1)
+table.insert(samples, { T = t, V = self:_valueAt(t) })
+end
+end
+table.sort(samples, function(a, b)
+return a.T < b.T
+end)
+end
+local keypoints = {}
+for index, sample in samples do
+keypoints[index] = NumberSequenceKeypoint.new(sample.T, math.clamp(sample.V, 0, 1))
+end
+return NumberSequence.new(keypoints)
+end
+function Graphic:_rebuild()
+if self._isCurve then
+self._tangents = computeTangents(self._points)
+self.Value = self:_numberSequence()
+else
+self.Value = self:_colorSequence()
+end
+end
+function Graphic:_applyTheme()
+if not self._isCurve then
+return
+end
+local accent = self._theme:Get("Accent")
+for _, column in self._columns do
+column.Fill.BackgroundColor3 = accent
+column.Cap.BackgroundColor3 = accent
+end
+for _, bar in self._mini do
+bar.BackgroundColor3 = accent
+end
+end
+function Graphic:_syncHandles()
+local handles = self._handles
+local parent = self._isCurve and self._plot or self._strip
+while #handles < #self._points do
+table.insert(handles, self._isCurve and createCurveHandle(parent) or createGradientHandle(parent))
+end
+while #handles > #self._points do
+local handle = table.remove(handles)
+handle.Root:Destroy()
+end
+end
+function Graphic:_renderButtons(animated)
+local theme = self._theme
+for _, entry in self._buttons do
+self:_play(
+entry.Button,
+{ BackgroundColor3 = entry.Hovered and theme:Get("ElementHover") or theme:Get("Element") },
+animated
+)
+end
+end
+function Graphic:_renderInfo()
+local points = self._points
+local point = self._selected
+local index = table.find(points, point)
+local interior = index ~= nil and index > 1 and index < #points
+if not self._timeBox:IsFocused() then
+self._timeBox.Text = string.format("%.1f%%", point.T * 100)
+end
+self._timeBox.TextEditable = interior
+if self._valueBox and not self._valueBox:IsFocused() then
+self._valueBox.Text = string.format("%.3f", point.V)
+end
+self._deleteButton.TextTransparency = interior and 0.0 or 0.55
+end
+function Graphic:_render(skipPicker)
+local theme = self._theme
+local accent = theme:Get("Accent")
+self:_syncHandles()
+local points = self._points
+if self._isCurve then
+local previous = self:_valueAt(0)
+for index = 1, COLUMNS do
+local nextValue = self:_valueAt(index / COLUMNS)
+local top = math.max(previous, nextValue)
+local bottom = math.min(previous, nextValue)
+local column = self._columns[index]
+column.Fill.Size = UDim2.new(1 / COLUMNS, 1, (previous + nextValue) / 2, 0)
+column.Cap.Position = UDim2.new((index - 1) / COLUMNS, 0, 1 - top, -1)
+column.Cap.Size = UDim2.new(1 / COLUMNS, 1, top - bottom, 2)
+previous = nextValue
+end
+for index, bar in self._mini do
+bar.Size = UDim2.new(1 / MINI_COLUMNS, 0, self:_valueAt((index - 0.5) / MINI_COLUMNS), 1)
+end
+for index, point in points do
+local handle = self._handles[index]
+local selected = point == self._selected
+handle.Root.Position = UDim2.fromScale(point.T, 1 - point.V)
+handle.Root.BackgroundColor3 = selected and accent or WHITE
+handle.Root.ZIndex = selected and 5 or 4
+handle.Stroke.Color = selected and WHITE or accent
+end
+else
+self._barGradient.Color = self.Value
+self._swatchGradient.Color = self.Value
+for index, point in points do
+local handle = self._handles[index]
+local selected = point == self._selected
+handle.Root.Position = UDim2.new(point.T, 0, 0, 0)
+handle.Root.ZIndex = selected and 3 or 2
+handle.Body.BackgroundColor3 = point.C
+handle.Stroke.Color = selected and accent or WHITE
+handle.Stroke.Thickness = selected and 2 or 1
+end
+if self._picker then
+if not skipPicker then
+self._picker:Set(self._selected.C, true)
+end
+if self._pickerLabel then
+local index = table.find(points, self._selected) or 1
+self._pickerLabel.Text = string.format("Point %d  (%.0f%%)", index, self._selected.T * 100)
+end
+end
+end
+self:_renderInfo()
+end
+function Graphic:_commit(skipPicker)
+self:_rebuild()
+self:_render(skipPicker)
+self:_emit(self.Value)
+end
+function Graphic:_onPickerChanged(color)
+self._selected.C = color
+self:_commit(true)
+end
+function Graphic:_locate(position)
+local area = self._area
+local size = area.AbsoluteSize
+if size.X <= 0 or size.Y <= 0 then
+return nil
+end
+local origin = area.AbsolutePosition
+return math.clamp((position.X - origin.X) / size.X, 0, 1), (position.Y - origin.Y) / size.Y, size
+end
+function Graphic:_nearest(ax, ay, size)
+local scale = math.max(self._ctx.GetScale(), 0.01)
+local radius = (UserInputService.TouchEnabled and 16 or 10) * scale
+local best, bestDistance = nil, nil
+for _, point in self._points do
+local dx = (point.T - ax) * size.X
+local distance = math.abs(dx)
+if self._isCurve then
+local dy = ((1 - point.V) - ay) * size.Y
+distance = math.sqrt(dx * dx + dy * dy)
+end
+if distance <= radius and (bestDistance == nil or distance < bestDistance) then
+best, bestDistance = point, distance
+end
+end
+return best
+end
+function Graphic:_add(t, v)
+local points = self._points
+if #points >= self._maxPoints then
+return nil
+end
+local index = 1
+while index < #points - 1 and points[index + 1].T <= t do
+index += 1
+end
+local before, after = points[index], points[index + 1]
+if after.T - before.T < GAP * 2 then
+return nil
+end
+t = math.clamp(t, before.T + GAP, after.T - GAP)
+local point
+if self._isCurve then
+point = { T = t, V = math.clamp(v or self:_valueAt(t), 0, 1) }
+else
+point = { T = t, C = sampleColor(points, t) }
+end
+table.insert(points, index + 1, point)
+return point
+end
+function Graphic:_remove(point)
+local points = self._points
+local index = table.find(points, point)
+if not index or index == 1 or index == #points or #points <= 2 then
+return
+end
+table.remove(points, index)
+if self._selected == point then
+self._selected = points[index - 1]
+end
+self:_commit()
+end
+function Graphic:_move(point, t, v)
+local points = self._points
+local index = table.find(points, point)
+if not index then
+return
+end
+local changed = false
+if index > 1 and index < #points then
+t = math.clamp(t, points[index - 1].T + GAP, points[index + 1].T - GAP)
+if t ~= point.T then
+point.T = t
+changed = true
+end
+end
+if v ~= nil and self._isCurve then
+v = math.clamp(v, 0, 1)
+if v ~= point.V then
+point.V = v
+changed = true
+end
+end
+if changed then
+self:_commit(true)
+end
+end
+function Graphic:_begin(input)
+if self._enabledState == false then
+return
+end
+local kind = input.UserInputType
+if kind ~= Enum.UserInputType.MouseButton1 and kind ~= Enum.UserInputType.MouseButton2 and kind ~= Enum.UserInputType.Touch then
+return
+end
+local ax, ay, size = self:_locate(input.Position)
+if not ax then
+return
+end
+local target = self:_nearest(ax, ay, size)
+if kind == Enum.UserInputType.MouseButton2 then
+if target then
+self:_remove(target)
+end
+return
+end
+local offsetT, offsetV = 0, 0
+if target then
+offsetT = target.T - ax
+if self._isCurve then
+offsetV = target.V - (1 - ay)
+end
+self._selected = target
+self:_render()
+else
+target = self:_add(ax, self._isCurve and (1 - ay) or nil)
+if not target then
+return
+end
+self._selected = target
+self:_commit()
+end
+self._drag = { Point = target, Origin = input.Position, Moved = false, Input = input, OffsetT = offsetT, OffsetV = offsetV }
+self:_lockScroll(true)
+end
+function Graphic:_dragTo(position)
+local drag = self._drag
+if not drag then
+return
+end
+local scale = math.max(self._ctx.GetScale(), 0.01)
+if not drag.Moved then
+if (position - drag.Origin).Magnitude <= 3 * scale then
+return
+end
+drag.Moved = true
+end
+local ax, ay = self:_locate(position)
+if not ax then
+return
+end
+self:_move(drag.Point, ax + drag.OffsetT, self._isCurve and ((1 - ay) + drag.OffsetV) or nil)
+end
+function Graphic:_updateHeight(animated)
+if self._destroyed then
+return
+end
+local height = HEADER_HEIGHT
+if self._open then
+local measured = self._content.AbsoluteSize.Y / math.max(self._ctx.GetScale(), 0.01)
+if measured <= 0 then
+measured = BODY_HEIGHT + (self._picker and PICKER_ROW_HEIGHT or 0)
+end
+height += measured
+end
+self:_play(self.Frame, { Size = UDim2.new(1, 0, 0, height) }, animated, "Expand")
+end
+function Graphic:SetOpen(open)
+open = not not open
+if open == self._open then
+return
+end
+self._open = open
+self._animating = true
+self._animToken += 1
+local token = self._animToken
+task.delay(AnimationManager.Time(0.3), function()
+if self._animToken == token then
+self._animating = false
+end
+end)
+self:_updateHeight(true)
+end
+function Graphic:Reverse()
+if self._isCurve then
+return
+end
+local reversed = {}
+for index = #self._points, 1, -1 do
+local point = self._points[index]
+point.T = 1 - point.T
+table.insert(reversed, point)
+end
+self._points = reversed
+self:_commit()
+end
+function Graphic:Get()
+return self.Value
+end
+function Graphic:Set(value, silent)
+local points = self:_prepare(self:_parse(value))
+if not points then
+return
+end
+self._points = points
+self._selected = points[1]
+self:_rebuild()
+self:_render()
+if not silent then
+self:_emit(self.Value)
+end
+end
+function Graphic:Serialize()
+local points = {}
+for index, point in self._points do
+if self._isCurve then
+points[index] = { round(point.T), round(point.V) }
+else
+points[index] = { round(point.T), round(point.C.R), round(point.C.G), round(point.C.B) }
+end
+end
+return { Mode = self._mode, Points = points }
+end
+function Graphic:Deserialize(value)
+self:Set(value)
+end
+return Graphic
 end
 __functions[__n_Components_ImageButton] = function(script, require)
 local Base = require(script.Parent.Base)
@@ -4971,6 +5976,7 @@ Module.CreateSlider = lazy("Slider")
 Module.CreateDropdown = lazy("Dropdown")
 Module.CreateKeybind = lazy("Keybind")
 Module.CreateColorPicker = lazy("ColorPicker")
+Module.CreateGraphic = lazy("Graphic")
 Module.CreateTextbox = lazy("Textbox")
 Module.CreateButton = lazy("Button")
 Module.CreateRangeSlider = lazy("RangeSlider")
@@ -11504,6 +12510,17 @@ Name: string,
 Default: Color3?,
 Callback: ((color: Color3) -> ())?,
 Flag: string?,
+}
+type GraphicOptions = {
+Name: string,
+Mode: ("Gradient" | "Curve")?,
+Default: (ColorSequence | NumberSequence | Color3 | number)?,
+Callback: ((value: ColorSequence | NumberSequence) -> ())?,
+Flag: string?,
+Tooltip: string?,
+MaxPoints: number?,
+Smooth: boolean?,
+Expanded: boolean?,
 }
 type TextboxOptions = {
 Name: string,
